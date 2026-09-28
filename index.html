@@ -516,7 +516,7 @@
     <div class="popup-content">
         <div class="popup-title" id="popupTitle">Confirm Action</div>
         <p class="popup-message" id="popupMessage"></p>
-        <input type="password" class="password-input" id="passwordInput" placeholder="••••" maxlength="4" inputmode="numeric" autocomplete="off" aria-label="Password" hidden>
+        <input type="password" class="password-input" id="passwordInput" placeholder="••••" maxlength="4" inputmode="numeric" autocomplete="off" aria-label="PIN" hidden>
         <div class="popup-actions">
             <button class="popup-cancel" onclick="closeConfirmPopup()">Cancel</button>
             <button class="popup-confirm" id="confirmBtn">Confirm</button>
@@ -554,7 +554,7 @@
 const DB_NAME='MuhafizDB',DB_VER=1,STORE='appData';
 const DATA_KEYS=['filesOut','overdueFiles','returnedFiles','pendingTasks','overdueTasks','completedTasks',
     'materialsOut','materialsOverdue','materialsReturned','englishFile_folders','bailBonds','record_folders'];
-const DELETE_PIN='0000';
+const DEFAULT_PIN='0000';  // used until the user sets their own PIN
 let _db=null;
 const _cache={};  // sync read cache populated at startup
 
@@ -954,6 +954,10 @@ function renderSidebar(){
         <button class="menu-item" id="menuProcessing" onclick="openProcessing()">⚖️ Processing (اجرائی)</button>
     </div>
     <div class="sb-section">
+        <span class="sb-section-title">Security</span>
+        <button class="menu-item" onclick="openChangePin()">🔒 Change PIN</button>
+    </div>
+    <div class="sb-section">
         <span class="sb-section-title">Backup</span>
         <button class="menu-item" onclick="importData()">📥 Import Data</button>
         <button class="menu-item" onclick="exportData()">📤 Export Data</button>
@@ -1285,7 +1289,7 @@ async function doReceive(id,type){
     refreshDetail();
 }
 function confirmDelete(id,type,title){
-    showConfirmPopup('Delete Entry',`Enter password to delete "${title}"`,()=>doDelete(id,type),true,{confirmText:'Delete',danger:true});
+    showConfirmPopup('Delete Entry',`Enter your PIN to delete "${title}"`,()=>doDelete(id,type),true,{confirmText:'Delete',danger:true});
 }
 async function doDelete(id,type){
     if(!RETURNED_TYPES.includes(type))return;
@@ -1306,15 +1310,80 @@ function showConfirmPopup(title,msg,onOk,needPw=false,{confirmText='Confirm',dan
     btn.textContent=confirmText;btn.classList.toggle('danger',danger);
     document.getElementById('confirmPopup').classList.add('active');
     setTimeout(()=>(needPw?pw:btn).focus(),120);
-    btn.onclick=()=>{
-        if(needPw&&pw.value!==DELETE_PIN){
-            toast('Incorrect password!','error');
-            pw.value='';pw.classList.remove('shake');void pw.offsetWidth;pw.classList.add('shake');pw.focus();
-            return;
+    btn.onclick=async()=>{
+        if(needPw){
+            if(btn.dataset.busy)return;
+            btn.dataset.busy='1';
+            let ok=false;
+            try{ok=await checkPinAttempt(pw.value);}finally{delete btn.dataset.busy;}
+            if(!ok){
+                pw.value='';pw.classList.remove('shake');void pw.offsetWidth;pw.classList.add('shake');pw.focus();
+                return;
+            }
         }
         closeConfirmPopup();
         if(onOk)onOk();
     };
+}
+
+// ============================================================
+//  PIN (stored only as a salted SHA-256 hash, never as plain text)
+// ============================================================
+const PIN_MAX_FAILS=5,PIN_LOCK_MS=30000;
+let _pinFails=0,_pinLockUntil=0;
+function isValidPin(p){return /^\d{4}$/.test(p);}
+async function hashPin(pin){
+    let salt=cacheGet('pinSalt');
+    if(!salt){
+        const b=new Uint8Array(16);crypto.getRandomValues(b);
+        salt=Array.from(b,x=>x.toString(16).padStart(2,'0')).join('');
+        await dbSet('pinSalt',salt);
+    }
+    const data=new TextEncoder().encode(salt+':'+pin);
+    const buf=await crypto.subtle.digest('SHA-256',data);
+    return Array.from(new Uint8Array(buf),x=>x.toString(16).padStart(2,'0')).join('');
+}
+async function verifyPin(pin){
+    const stored=cacheGet('pinHash');
+    if(!stored)return pin===DEFAULT_PIN;
+    return (await hashPin(pin))===stored;
+}
+// Verify with brute-force protection: lock for 30s after 5 wrong attempts
+async function checkPinAttempt(pin){
+    const wait=_pinLockUntil-Date.now();
+    if(wait>0){toast(`Too many wrong attempts. Try again in ${Math.ceil(wait/1000)}s`,'error');return false;}
+    if(await verifyPin(pin)){_pinFails=0;return true;}
+    _pinFails++;
+    if(_pinFails>=PIN_MAX_FAILS){
+        _pinFails=0;_pinLockUntil=Date.now()+PIN_LOCK_MS;
+        toast('Too many wrong attempts. Locked for 30 seconds','error');
+    }else toast(`Incorrect PIN! ${PIN_MAX_FAILS-_pinFails} attempt(s) left`,'error');
+    return false;
+}
+function openChangePin(){
+    closeSidebar();
+    const usingDefault=!cacheGet('pinHash');
+    const pinInput=(id,lbl)=>`<div class="field-group"><label for="${id}">${lbl} <span class="required">*</span></label><input type="password" class="password-input" id="${id}" maxlength="4" inputmode="numeric" autocomplete="off" placeholder="••••"></div>`;
+    showEntryPopup(`<h2 class="popup-title">🔒 Change PIN</h2>
+<p class="popup-sub">This 4-digit PIN is required to delete any entry, folder or document.${usingDefault?'<br><strong>You are using the default PIN (0000). Please change it.</strong>':''}</p>
+${pinInput('pinCurrent','Current PIN')}${pinInput('pinNew','New PIN')}${pinInput('pinConfirm','Confirm New PIN')}
+<div class="popup-actions"><button class="popup-cancel" onclick="closePopup()">Cancel</button><button class="popup-confirm" id="pinSaveBtn" onclick="saveNewPin()">Save PIN</button></div>`,false);
+}
+async function saveNewPin(){
+    const btn=document.getElementById('pinSaveBtn');
+    if(!btn||btn.disabled)return;
+    const cur=gv('pinCurrent'),nw=gv('pinNew'),cf=gv('pinConfirm');
+    if(!cur||!nw||!cf){toast('Please fill all fields!','error');return;}
+    if(!isValidPin(nw)){toast('New PIN must be exactly 4 digits!','error');return;}
+    if(nw!==cf){toast('New PIN and Confirm PIN do not match!','error');document.getElementById('pinConfirm').value='';return;}
+    if(nw===cur){toast('New PIN must be different from current PIN!','error');return;}
+    btn.disabled=true;
+    try{
+        if(!await checkPinAttempt(cur)){document.getElementById('pinCurrent').value='';document.getElementById('pinCurrent').focus();return;}
+        await dbSet('pinHash',await hashPin(nw));
+        closePopup();toast('✓ PIN changed successfully','success');
+    }catch(e){toast('Could not change PIN: '+e.message,'error');}
+    finally{if(document.getElementById('pinSaveBtn'))btn.disabled=false;}
 }
 function closeConfirmPopup(){
     document.getElementById('confirmPopup').classList.remove('active');
@@ -1497,7 +1566,7 @@ function editFolder(cat,fi){
 function deleteFolder(cat,fi){
     const sk=cat+'_folders',f=getArr(sk)[fi];if(!f)return;
     const nm=cat==='record'?`${f.month} ${f.year}`:f.name;
-    confirmWithPin('Delete Folder',`Delete "${nm}" and all its contents? Enter password to confirm.`,async()=>{
+    confirmWithPin('Delete Folder',`Delete "${nm}" and all its contents? Enter your PIN to confirm.`,async()=>{
         const folders=getArr(sk);folders.splice(fi,1);
         try{await setArr(sk,folders);toast('Folder deleted','success');}catch(e){toast('Delete failed: '+e.message,'error');}
         if(cat==='englishFile')openEnglishFile(true);else openRecord(true);
@@ -1514,7 +1583,7 @@ function editDocument(cat,fi,di){
 }
 function deleteDocument(cat,fi,di){
     const doc=(engFolders()[fi]||{documents:[]}).documents[di];if(!doc)return;
-    confirmWithPin('Delete Document',`Delete "${doc.name}"? Enter password to confirm.`,async()=>{
+    confirmWithPin('Delete Document',`Delete "${doc.name}"? Enter your PIN to confirm.`,async()=>{
         const folders=engFolders();folders[fi].documents.splice(di,1);
         try{await setArr('englishFile_folders',folders);toast('Document deleted','success');}catch(e){toast('Delete failed: '+e.message,'error');}
         openEnglishFolder(fi,true);loadCounts();
@@ -1581,7 +1650,7 @@ function viewBailBond(i,fromBack){
 }
 function deleteBailBond(i){
     const b=getArr('bailBonds')[i];if(!b)return;
-    confirmWithPin('Delete Bail Bond',`Delete "${b.title}"? Enter password to confirm.`,async()=>{
+    confirmWithPin('Delete Bail Bond',`Delete "${b.title}"? Enter your PIN to confirm.`,async()=>{
         const bonds=getArr('bailBonds');bonds.splice(i,1);
         try{await setArr('bailBonds',bonds);toast('Bail bond deleted','success');}catch(e){toast('Delete failed: '+e.message,'error');}
         openBailBonds(true);loadCounts();
@@ -1751,7 +1820,7 @@ async function updateRecCase(fi,ci){
 }
 function deleteRecordCase(fi,ci){
     const cd=(recFolders()[fi]||{cases:[]}).cases[ci];if(!cd)return;
-    confirmWithPin('Delete Case',`Delete "${cd.title}"? Enter password to confirm.`,async()=>{
+    confirmWithPin('Delete Case',`Delete "${cd.title}"? Enter your PIN to confirm.`,async()=>{
         const folders=recFolders();folders[fi].cases.splice(ci,1);
         try{await setArr('record_folders',folders);toast('Case deleted','success');}catch(e){toast('Delete failed: '+e.message,'error');}
         openRecordFolder(fi,true);loadCounts();
