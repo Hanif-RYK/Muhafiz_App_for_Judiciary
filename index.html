@@ -307,6 +307,14 @@
         .input-field:last-child{margin-bottom:0;}
         .input-field label,.field-group label{display:block;font-size:14px;font-weight:650;color:var(--text);margin-bottom:7px;}
         .required{color:var(--red);}
+        .label-row{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:7px;}
+        .label-row label{margin-bottom:0!important;}
+        .contact-btn{
+            flex-shrink:0;padding:6px 12px;border-radius:999px;cursor:pointer;
+            border:1px solid var(--border);background:var(--accent-soft);color:var(--accent-text);
+            font-size:12.5px;font-weight:700;transition:transform 0.12s;
+        }
+        .contact-btn:active{transform:scale(0.95);}
         .input-field input,.input-field select,.input-field textarea,
         .field-group input,.field-group select,.field-group textarea{
             width:100%;padding:13px 14px;font-size:16px;
@@ -1090,7 +1098,7 @@ function selectField(id,lbl,opts,onchange=''){
     return`<div class="input-field"><label for="${id}">${lbl} <span class="required">*</span></label><select id="${id}"${onchange?` onchange="${onchange}"`:''}><option value="">Select</option>${opts.map(o=>`<option value="${o}">${label(o)}</option>`).join('')}</select></div>`;
 }
 function personFields(){
-    return`<div class="input-field" id="nameField" hidden><label for="name">Name <span class="required">*</span></label><input type="text" id="name" autocomplete="name" maxlength="60"></div>
+    return`<div class="input-field" id="nameField" hidden><div class="label-row"><label for="name">Name <span class="required">*</span></label>${contactBtn('name','mobile')}</div><input type="text" id="name" autocomplete="name" maxlength="60"></div>
 <div class="input-field" id="mobileField" hidden><label for="mobile">Mobile <span class="required">*</span></label><input type="tel" id="mobile" placeholder="03XXXXXXXXX" inputmode="numeric" maxlength="13" autocomplete="tel"></div>`;
 }
 function durationField(){
@@ -1164,11 +1172,43 @@ function getDurExpiry(){
 //  SAVE ENTRY
 // ============================================================
 function valMob(m){return /^03[0-9]{9}$/.test(m);}
+// "+92 300-1234567", "0092300…", "92300…" → "03001234567"
+function normalizePkMobile(t){
+    let d=String(t||'').replace(/[^\d+]/g,'');
+    if(d.startsWith('+92'))d='0'+d.slice(3);
+    else if(d.startsWith('0092'))d='0'+d.slice(4);
+    else if(d.startsWith('92')&&d.length===12)d='0'+d.slice(2);
+    return d.replace(/\+/g,'');
+}
+
+// ============================================================
+//  CONTACT PICKER (Android Chrome / installed app). The app only
+//  receives the one contact the user picks — no access to the full list.
+// ============================================================
+const CONTACTS_OK='contacts' in navigator&&'ContactsManager' in window;
+function contactBtn(nameId,mobileId){
+    return CONTACTS_OK?`<button type="button" class="contact-btn" onclick="pickContact('${nameId}','${mobileId}')">📇 Contacts</button>`:'';
+}
+async function pickContact(nameId,mobileId){
+    let c;
+    try{[c]=await navigator.contacts.select(['name','tel'],{multiple:false});}
+    catch(e){if(e.name!=='AbortError')toast('Could not open contacts: '+e.message,'error');return;}
+    if(!c)return;  // user cancelled
+    const name=(c.name||[]).find(n=>n&&n.trim())||'';
+    const tels=[...new Set((c.tel||[]).map(normalizePkMobile).filter(Boolean))];
+    const mobile=tels.find(valMob);
+    const nEl=document.getElementById(nameId),mEl=document.getElementById(mobileId);
+    if(nEl&&name)nEl.value=name.trim().slice(0,60);
+    if(!mEl)return;
+    if(mobile){mEl.value=mobile;toast(`✓ ${name||'Contact'} selected`,'success');}
+    else if(tels.length){mEl.value=tels[0].slice(0,13);toast('This number is not a mobile number (03XXXXXXXXX) — please check','error');mEl.focus();}
+    else toast('This contact has no phone number','error');
+}
 function gv(id){const el=document.getElementById(id);return el?(el.value||'').trim():'';}
 function fail(msg){toast(msg,'error');return null;}
 // Shared validation for name + mobile; returns {name,mobile} or null
 function personValues(){
-    const name=gv('name'),mobile=gv('mobile').replace(/[\s-]/g,'');
+    const name=gv('name'),mobile=normalizePkMobile(gv('mobile'));
     if(!name||!mobile)return fail('Please fill all required fields!');
     if(!valMob(mobile))return fail('Mobile must be 11 digits starting with 03!');
     return{name,mobile};
@@ -1375,7 +1415,7 @@ function toLocalInput(iso){
 }
 // Field specs for the edit popup, per entry mode
 function editSpec(f){
-    const person=[{id:'name',label:'Name',req:1,max:60},{id:'mobile',label:'Mobile',type:'tel',req:1,max:13}];
+    const person=[{id:'name',label:'Name',req:1,max:60,contact:'mobile'},{id:'mobile',label:'Mobile',type:'tel',req:1,max:13}];
     const due={id:'_due',type:'datetime-local',req:1,value:toLocalInput(f.expiresAt),
         label:f.mode==='assignedTask'?'Due Complete (Date & Time)':'Due Return (Date & Time)'};
     if(f.mode==='process')return[
@@ -1385,7 +1425,7 @@ function editSpec(f){
         {id:'issuedTo',label:'Issued To (Name)',req:1,max:80},
         {id:'partyRole',label:'Party Role',type:'select',opts:PARTY_ROLES,req:1},
         {id:'address',label:'Address',type:'textarea',max:300},
-        {id:'serverName',label:'Process Server / Bailiff',max:60},
+        {id:'serverName',label:'Process Server / Bailiff',max:60,contact:'mobile'},
         {id:'mobile',label:'Process Server Mobile',type:'tel',max:13},
         {id:'issueDate',label:'Issue Date',type:'date',req:1},
         {id:'dateField',label:'Next Hearing Date',type:'date',req:1}];
@@ -1408,7 +1448,9 @@ function editSpec(f){
 function specHtml(spec,f){
     return spec.map(x=>{
         const v=x.value!==undefined?x.value:(f[x.id]||'');
-        const id='ed_'+x.id,star=x.req?' <span class="required">*</span>':'',lbl=`<label for="${id}">${x.label}${star}</label>`;
+        const id='ed_'+x.id,star=x.req?' <span class="required">*</span>':'';
+        let lbl=`<label for="${id}">${x.label}${star}</label>`;
+        if(x.contact){const b=contactBtn(id,'ed_'+x.contact);if(b)lbl=`<div class="label-row">${lbl}${b}</div>`;}
         let input;
         if(x.type==='select'){
             const opts=x.opts.includes(v)||!v?x.opts:[...x.opts,v];  // keep legacy values selectable
@@ -1432,7 +1474,7 @@ async function saveEditedEntry(id,type){
     spec.forEach(x=>{v[x.id]=gv('ed_'+x.id);});
     if(spec.some(x=>x.req&&!v[x.id]))return fail('Please fill all required fields!');
     if(v.mobile!==undefined){
-        v.mobile=v.mobile.replace(/[\s-]/g,'');
+        v.mobile=normalizePkMobile(v.mobile);
         if(v.mobile&&!valMob(v.mobile))return fail('Mobile must be 11 digits starting with 03!');
     }
     const changes={...v};delete changes._due;
@@ -2067,7 +2109,7 @@ function processFields(){
 `<div class="input-field"><label for="issuedTo">Issued To (Name) <span class="required">*</span></label><input type="text" id="issuedTo" placeholder="Party / witness name" maxlength="80"></div>`+
         selectField('partyRole','Party Role',PARTY_ROLES)+
 `<div class="input-field"><label for="address">Address</label><textarea id="address" placeholder="Optional" maxlength="300"></textarea></div>`+
-        opt('serverName','Process Server / Bailiff','Optional','maxlength="60"')+
+        opt('serverName','Process Server / Bailiff','Optional','maxlength="60"').replace('<label for="serverName">Process Server / Bailiff</label>',`<div class="label-row"><label for="serverName">Process Server / Bailiff</label>${contactBtn('serverName','mobile')}</div>`)+
         opt('mobile','Process Server Mobile','03XXXXXXXXX (optional)','inputmode="numeric" maxlength="13"').replace('type="text"','type="tel"')+
 `<div class="input-field"><label for="issueDate">Issue Date <span class="required">*</span></label><input type="date" id="issueDate" value="${t}" max="${t}"></div>
 <div class="input-field"><label for="dateField">Next Hearing Date <span class="required">*</span></label><input type="date" id="dateField" min="${t}"></div>`+
@@ -2075,7 +2117,7 @@ function processFields(){
 }
 async function saveProcess(){
     const pt=gv('processType'),ct=gv('caseTitle'),to=gv('issuedTo'),role=gv('partyRole'),issue=gv('issueDate'),hearing=gv('dateField');
-    const mobile=gv('mobile').replace(/[\s-]/g,'');
+    const mobile=normalizePkMobile(gv('mobile'));
     if(!pt||!ct||!to||!role||!issue||!hearing)return fail('Please fill all required fields!');
     if(mobile&&!valMob(mobile))return fail('Mobile must be 11 digits starting with 03!');
     const hd=parseDate(hearing),idt=parseDate(issue);
