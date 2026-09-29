@@ -172,11 +172,6 @@
             box-shadow:0 4px 12px var(--accent-glow);transition:transform 0.12s;
         }
         .icon-add-btn:active{transform:scale(0.92);}
-        .mode-chip{
-            display:inline-flex;align-items:center;gap:6px;margin:-4px 0 14px 2px;
-            padding:5px 12px;border-radius:999px;font-size:12.5px;font-weight:650;
-            background:var(--accent-soft);color:var(--accent-text);
-        }
 
         /* ── DASHBOARD CARDS ── */
         .cards{display:grid;gap:12px;}
@@ -267,6 +262,16 @@
         .theme-switch{display:flex;gap:4px;margin:4px 12px 6px;padding:4px;border-radius:12px;background:var(--surface-2);border:1px solid var(--border);}
         .theme-switch button{flex:1;padding:9px 4px;border:none;border-radius:9px;background:none;cursor:pointer;font-size:13px;font-weight:650;color:var(--text-2);transition:background 0.15s,color 0.15s;}
         .theme-switch button[aria-pressed="true"]{background:var(--surface);color:var(--accent-text);box-shadow:var(--shadow-sm);}
+        .backup-banner{
+            display:flex;flex-direction:column;gap:10px;margin-bottom:14px;padding:14px;
+            background:var(--amber-soft);border:1px solid var(--amber);border-radius:var(--radius);
+        }
+        .backup-banner strong{display:block;color:var(--text);font-size:14.5px;margin-bottom:2px;}
+        .backup-banner span{font-size:13px;color:var(--text-2);}
+        .bb-actions{display:flex;gap:8px;}
+        .bb-actions button{flex:1;padding:10px;border-radius:10px;font-weight:700;font-size:14px;cursor:pointer;}
+        .bb-primary{background:var(--accent);color:#fff;border:none;}
+        .bb-later{background:var(--surface);color:var(--text);border:1px solid var(--border);}
         .sidebar-footer{margin-top:auto;padding:14px 20px;font-size:11.5px;color:var(--text-3);text-align:center;}
 
         /* ── FULL-SCREEN VIEWS ── */
@@ -380,6 +385,7 @@
         }
         .action-btn:active{transform:scale(0.95);filter:brightness(0.92);}
         .call-btn{background:#059669;}
+        .more-btn{flex:0 0 46px;background:var(--surface-2);color:var(--text);border:1px solid var(--border);font-size:18px;line-height:1;}
         .receive-btn{background:#1d4ed8;}
         .delete-btn{background:#dc2626;}
         .overdue-warning{
@@ -581,7 +587,7 @@
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-<input type="file" id="importFileInput" accept=".json,application/json" hidden>
+<input type="file" id="importFileInput" accept=".json,.txt,application/json,text/plain" hidden>
 
 <script>
 'use strict';
@@ -727,6 +733,7 @@ const LABELS={
     served_personal:'Served (Personally)',served_affixation:'Served (Affixation)',refused:'Refused to Accept',
     not_found:'Not Found / Address Incomplete',unexecuted:'Returned Unexecuted',other:'Other'
 };
+const NATURES=['civil','criminal','execution','miscellaneous','others'];
 const PROCESS_TYPES=['summons','notice','bailable_warrant','non_bailable_warrant','proclamation','others'];
 const PARTY_ROLES=['plaintiff','defendant','accused','witness','others'];
 const REPORT_RESULTS=['served_personal','served_affixation','refused','not_found','unexecuted','other'];
@@ -879,6 +886,7 @@ document.addEventListener('DOMContentLoaded',async()=>{
         setInterval(runOverdueChecks,30000);
         setInterval(()=>{refreshTimers();updateDate();},30000);
         setupGlobalListeners();
+        requestPersistentStorage();
     }catch(e){
         console.error(e);
         dash.innerHTML=`<div class="wrap"><div class="form-section"><h2 class="popup-title">Something went wrong</h2><p class="popup-sub">${esc(e&&e.message||e)}</p><button class="save-btn" style="width:100%" onclick="location.reload()">Reload</button></div></div>`;
@@ -925,7 +933,7 @@ function dashKey(){
     return'fileMovement';
 }
 function updateMenuSel(){
-    const ids={fileMovement:curType==='title'?'menuFileTitle':'menuFilePicture',task:'menuAssignedTask',material:'menuMaterialMovement',myDocument:'menuMyDocument',processing:'menuProcessing'};
+    const ids={fileMovement:'menuFileEntry',task:'menuAssignedTask',material:'menuMaterialMovement',myDocument:'menuMyDocument',processing:'menuProcessing'};
     document.querySelectorAll('.menu-item').forEach(i=>{i.classList.remove('active');i.removeAttribute('aria-current');});
     const el=document.getElementById(ids[dashKey()]);
     if(el){el.classList.add('active');el.setAttribute('aria-current','page');}
@@ -958,13 +966,11 @@ const DASH={
 };
 function renderDashboard(){
     const cfg=DASH[dashKey()];
-    let chip='';
-    if(curMode==='fileMovement')chip=`<div class="mode-chip">${curType==='title'?'📝 Title Entry':'📷 Picture Entry'}</div>`;
     const cards=cfg.cards.map(([cls,onclick,lbl,key,icon])=>
         `<button class="card ${cls}" onclick="${onclick}" data-count="${key}"><div class="card-content"><h2>${lbl}</h2><div class="count" id="count-${key}">0</div></div><div class="card-icon" aria-hidden="true">${icon}</div></button>`).join('');
     document.getElementById('mainDashboard').innerHTML=`<div class="wrap">
 <header class="header"><button class="menu-icon" onclick="openSidebar()" aria-label="Open menu"><span></span><span></span><span></span></button><div class="header-content"><h1>${cfg.title}</h1><div class="date" id="currentDate"></div></div><img class="header-logo" src="icon-192.png" alt="" width="36" height="36"></header>
-${chip}<div class="cards">${cards}</div>
+<div id="backupBanner"></div><div class="cards">${cards}</div>
 ${cfg.btn?`<button class="new-entry-btn" onclick="handleNewEntry()">＋ ${cfg.btn}</button>`:''}</div>`;
     updateDate();
 }
@@ -980,6 +986,7 @@ function loadCounts(){
         card.classList.toggle('has-alert',OVERDUE_TYPES.includes(key)&&v>0);
         card.setAttribute('aria-label',`${card.querySelector('h2').textContent}: ${v}`);
     });
+    updateBackupBanner();
 }
 
 // ============================================================
@@ -994,8 +1001,7 @@ function renderSidebar(){
     </div>
     <div class="sb-section">
         <span class="sb-section-title">File Movement</span>
-        <button class="menu-item" id="menuFilePicture" onclick="selectMode('fileMovement','picture')">📷 Picture Entry</button>
-        <button class="menu-item" id="menuFileTitle" onclick="selectMode('fileMovement','title')">📝 Title Entry</button>
+        <button class="menu-item" id="menuFileEntry" onclick="selectMode('fileMovement','file')">📁 File Entry</button>
     </div>
     <div class="sb-section">
         <span class="sb-section-title">Office</span>
@@ -1021,10 +1027,10 @@ function renderSidebar(){
     </div>
     <div class="sb-section">
         <span class="sb-section-title">Backup</span>
-        <button class="menu-item" onclick="importData()">📥 Import Data</button>
-        <button class="menu-item" onclick="exportData()">📤 Export Data</button>
+        <button class="menu-item" onclick="openBackup()">💾 Backup Now</button>
+        <button class="menu-item" onclick="importData()">📥 Restore Backup</button>
     </div>
-    <div class="sidebar-footer">Data is stored securely on this device only.<br>Export a backup regularly.</div>`;
+    <div class="sidebar-footer">Data is stored on this device only.<br><span id="lastBackupText">${lastBackupText()}</span></div>`;
     updateMenuSel();updateThemeButtons();
 }
 function openSidebar(){
@@ -1070,10 +1076,10 @@ function handleNewEntry(){
 }
 function renderForm(){
     const k=dashKey();
-    const isTask=k==='task',isMat=k==='material',isProc=k==='processing',isPic=k==='fileMovement'&&curType==='picture';
+    const isTask=k==='task',isMat=k==='material',isProc=k==='processing';
     const title=isProc?'New Process Entry':isTask?'New Task':isMat?'New Material Entry':'New File Entry';
-    const sub=isProc?'Processing · Summons / Notices':isTask?'Assigned Task':isMat?'Office Materials':(isPic?'File Movement · Picture':'File Movement · Title');
-    const fields=isProc?processFields():isTask?taskFields():isMat?matFields():isPic?picFields():titleFields();
+    const sub=isProc?'Processing · Summons / Notices':isTask?'Assigned Task':isMat?'Office Materials':'File Movement';
+    const fields=isProc?processFields():isTask?taskFields():isMat?matFields():fileFields();
     document.getElementById('formContainer').innerHTML=`<div class="wrap">
 <header class="header view-header"><button class="back-btn" onclick="goBack()" aria-label="Back">←</button><div class="header-content"><h1>${title}</h1><div class="date">${sub}</div></div></header>
 <div class="form-section">${fields}</div>
@@ -1105,12 +1111,10 @@ function matFields(){
     return captureBox(true)+`<div class="input-field"><label for="materialDetails">Material Details</label><textarea id="materialDetails" placeholder="Enter material details" maxlength="1000"></textarea></div>`+
         selectField('takenBy','Taken By',['staff','official','advocate','clerk_advocate','others'],'toggleFields()')+personFields()+durationField();
 }
-function picFields(){
-    return captureBox(false)+hearingField()+selectField('takenBy','Taken By',['advocate','munshi','staff','others'],'toggleFields()')+personFields()+durationField();
-}
-function titleFields(){
-    return`<div class="input-field"><label for="title">Case Title <span class="required">*</span></label><input type="text" id="title" placeholder="Enter case title" maxlength="150"></div>`+
-        selectField('nature','Case Nature',['civil','criminal','execution','miscellaneous','others'])+hearingField()+
+// One form for all file entries: picture and/or case title (at least one is required)
+function fileFields(){
+    return captureBox(true)+`<div class="input-field"><label for="title">Case Title</label><input type="text" id="title" placeholder="Case title (required if no picture)" maxlength="150"></div>
+<div class="input-field"><label for="nature">Case Nature</label><select id="nature"><option value="">Select (optional)</option>${NATURES.map(o=>`<option value="${o}">${label(o)}</option>`).join('')}</select></div>`+hearingField()+
         selectField('takenBy','Taken By',['advocate','munshi','staff','others'],'toggleFields()')+personFields()+durationField();
 }
 function setupCamListener(){
@@ -1178,7 +1182,7 @@ async function saveEntry(){
         if(k==='processing')await saveProcess();
         else if(k==='task')await saveTask();
         else if(k==='material')await saveMat();
-        else await saveFileMov(curType==='picture');
+        else await saveFileMov();
     }finally{
         _saving=false;
         if(btn)btn.disabled=false;
@@ -1214,10 +1218,9 @@ async function saveMat(){
     const expAt=getDurExpiry();if(!expAt)return;
     await persistEntry('materialsOut',{...baseEntry(expAt,p,'officeMaterial'),image,materialDetails:md,takenBy:tb},'Material entry saved');
 }
-async function saveFileMov(isPic){
-    let title='',nature='',image=null;
-    if(isPic){image=capturedSrc();if(!image)return fail('Please capture an image!');title='Image Captured';nature='N/A';}
-    else{title=gv('title');nature=gv('nature');if(!title||!nature)return fail('Please fill all required fields!');}
+async function saveFileMov(){
+    const image=capturedSrc(),title=gv('title'),nature=gv('nature');
+    if(!image&&!title)return fail('Please capture a picture or enter the case title!');
     const df=gv('dateField'),tb=gv('takenBy');
     if(!df||!tb)return fail('Please fill all required fields!');
     const p=personValues();if(!p)return;
@@ -1296,9 +1299,9 @@ function renderFileItem(file,type){
 
     // BANNER: picture or title/taskType
     let banner='';
-    if(file.image)banner=`<button class="file-banner picture-banner" onclick="showFileImg(${jsArg(type)},${jsArg(fid)})">🖼 View Picture</button>`;
-    else if(file.title&&file.title!=='Image Captured')banner=`<div class="file-banner">${esc(file.title)}</div>`;
+    if(file.title&&file.title!=='Image Captured')banner=`<div class="file-banner">${esc(file.title)}</div>`;
     else if(file.taskType)banner=`<div class="file-banner">${esc(label(file.taskType))}</div>`;
+    if(file.image)banner+=`<button class="file-banner picture-banner" onclick="showFileImg(${jsArg(type)},${jsArg(fid)})">🖼 View Picture</button>`;
 
     // FILE INFO: hearing/decision date + nature
     let head='';
@@ -1312,7 +1315,7 @@ function renderFileItem(file,type){
     const doneLabel=file.mode==='assignedTask'?'Completed':'Returned';
     const dueLabel=file.mode==='assignedTask'?'Due Complete Date':'Due Return Date';
     const takenLine=useDateView
-        ?`<p><strong>Taken Date:</strong> ${fmtDate(file.createdAt)}</p><p><strong>${dueLabel}:</strong> ${fmtDate(file.expiresAt)}</p>`
+        ?`<p><strong>Taken Date:</strong> ${fmtDate(file.createdAt)}</p><p><strong>${dueLabel}:</strong> ${file.duration==='Custom'?fmtDateTime(file.expiresAt):fmtDate(file.expiresAt)}</p>`
         :`<p><strong>Taken:</strong> ${fmtDateTime(file.createdAt)} <span class="muted">for ${esc(file.duration||'')}</span></p>`;
     const timer=!isRet?`<p data-exp="${esc(file.expiresAt)}"><strong>Time Remaining:</strong> ${timeLeft(file.expiresAt)}</p>`:'';
     const doneAt=file.returnedAt||file.completedAt;
@@ -1332,7 +1335,8 @@ function renderFileItem(file,type){
     const rl=file.mode==='assignedTask'?'Complete':'Receive';
     const actions=`<button class="action-btn call-btn" onclick="makeCall(${jsArg(file.mobile||'')})">📞 Call</button>`+
         (!isRet?`<button class="action-btn receive-btn" onclick="confirmReceive(${jsArg(fid)},${jsArg(type)},${jsArg(entryTitle)},${jsArg(name)})">✓ ${rl}</button>`
-               :`<button class="action-btn delete-btn" onclick="confirmDelete(${jsArg(fid)},${jsArg(type)},${jsArg(entryTitle)})">🗑 Delete</button>`);
+               :`<button class="action-btn delete-btn" onclick="confirmDelete(${jsArg(fid)},${jsArg(type)},${jsArg(entryTitle)})">🗑 Delete</button>`)+
+        (!isRet?moreBtn(fid,type):'');
     return`<article class="file-item" data-s="${esc(search)}">${banner}${head}<div class="file-content"><div class="file-info">${info}</div>${warn}<div class="file-actions">${actions}</div></div></article>`;
 }
 function showFileImg(type,id){const f=getArr(type).find(x=>x.id===id);if(f&&f.image)showImgPrev(f.image);}
@@ -1344,6 +1348,132 @@ function showImgPrev(elOrSrc){
 }
 function closeImageModal(){document.getElementById('imageModal').classList.remove('show');document.getElementById('modalImage').removeAttribute('src');}
 function makeCall(m){if(m&&/^[0-9+]+$/.test(m))window.location.href='tel:'+m;}
+
+// ============================================================
+//  EDIT / DELETE PENDING ENTRIES
+// ============================================================
+function moreBtn(id,type){return`<button class="action-btn more-btn" onclick="entryOptions(${jsArg(id)},${jsArg(type)})" aria-label="More options">⋯</button>`;}
+// Locate an entry in its pending/overdue pair (it may have moved while the list was open)
+function findPending(id,type){
+    const pair=OVERDUE_PAIRS.find(p=>p.includes(type));if(!pair)return null;
+    for(const key of pair){const item=getArr(key).find(f=>f.id===id);if(item)return{pair,key,item};}
+    return null;
+}
+function entryOptions(id,type){
+    const found=findPending(id,type);
+    if(!found){toast('Entry not found','error');refreshDetail();return;}
+    showEntryPopup(`<h2 class="popup-title">Entry Options</h2>
+<div class="popup-actions stack">
+    <button class="popup-confirm" onclick="closePopup();editEntry(${jsArg(id)},${jsArg(type)})">✏️ Edit Entry</button>
+    <button class="popup-confirm danger" onclick="closePopup();deletePendingEntry(${jsArg(id)},${jsArg(type)})">🗑 Delete Entry</button>
+    <button class="popup-cancel" onclick="closePopup()">Cancel</button>
+</div>`,false);
+}
+function toLocalInput(iso){
+    const d=new Date(iso);if(isNaN(d))return'';
+    return`${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+// Field specs for the edit popup, per entry mode
+function editSpec(f){
+    const person=[{id:'name',label:'Name',req:1,max:60},{id:'mobile',label:'Mobile',type:'tel',req:1,max:13}];
+    const due={id:'_due',type:'datetime-local',req:1,value:toLocalInput(f.expiresAt),
+        label:f.mode==='assignedTask'?'Due Complete (Date & Time)':'Due Return (Date & Time)'};
+    if(f.mode==='process')return[
+        {id:'processType',label:'Process Type',type:'select',opts:PROCESS_TYPES,req:1},
+        {id:'caseTitle',label:'Case Title',req:1,max:150},
+        {id:'caseNo',label:'Case No.',max:40},
+        {id:'issuedTo',label:'Issued To (Name)',req:1,max:80},
+        {id:'partyRole',label:'Party Role',type:'select',opts:PARTY_ROLES,req:1},
+        {id:'address',label:'Address',type:'textarea',max:300},
+        {id:'serverName',label:'Process Server / Bailiff',max:60},
+        {id:'mobile',label:'Process Server Mobile',type:'tel',max:13},
+        {id:'issueDate',label:'Issue Date',type:'date',req:1},
+        {id:'dateField',label:'Next Hearing Date',type:'date',req:1}];
+    if(f.mode==='assignedTask')return[
+        {id:'taskType',label:'Task Type',type:'select',opts:['document','meeting','research','filing','others'],req:1},
+        {id:'taskDetails',label:'Task Details',type:'textarea',req:1,max:1000},
+        {id:'assignedTo',label:'Assigned To',type:'select',opts:['staff','official','advocate','clerk_advocate','others'],req:1},
+        ...person,due];
+    if(f.mode==='officeMaterial')return[
+        {id:'materialDetails',label:'Material Details',type:'textarea',max:1000},
+        {id:'takenBy',label:'Taken By',type:'select',opts:['staff','official','advocate','clerk_advocate','others'],req:1},
+        ...person,due];
+    return[
+        {id:'title',label:'Case Title',max:150,value:f.title==='Image Captured'?'':f.title},
+        {id:'nature',label:'Case Nature',type:'select',opts:NATURES,value:f.nature==='N/A'?'':f.nature},
+        {id:'dateField',label:'Hearing Date',type:'date',req:1},
+        {id:'takenBy',label:'Taken By',type:'select',opts:['advocate','munshi','staff','others'],req:1},
+        ...person,due];
+}
+function specHtml(spec,f){
+    return spec.map(x=>{
+        const v=x.value!==undefined?x.value:(f[x.id]||'');
+        const id='ed_'+x.id,star=x.req?' <span class="required">*</span>':'',lbl=`<label for="${id}">${x.label}${star}</label>`;
+        let input;
+        if(x.type==='select'){
+            const opts=x.opts.includes(v)||!v?x.opts:[...x.opts,v];  // keep legacy values selectable
+            input=`<select id="${id}"><option value="">${x.req?'Select':'Select (optional)'}</option>${opts.map(o=>`<option value="${esc(o)}"${o===v?' selected':''}>${esc(label(o))}</option>`).join('')}</select>`;
+        }else if(x.type==='textarea')input=`<textarea id="${id}" rows="3" maxlength="${x.max||500}">${esc(v)}</textarea>`;
+        else input=`<input type="${x.type||'text'}" id="${id}" value="${esc(v)}"${x.max?` maxlength="${x.max}"`:''}${x.type==='tel'?' inputmode="numeric"':''}>`;
+        return`<div class="field-group">${lbl}${input}</div>`;
+    }).join('');
+}
+function editEntry(id,type){
+    const found=findPending(id,type);
+    if(!found){toast('Entry not found','error');refreshDetail();return;}
+    const f=found.item;
+    showEntryPopup(`<h2 class="popup-title">✏️ Edit Entry</h2>${specHtml(editSpec(f),f)}
+<div class="popup-actions"><button class="popup-cancel" onclick="closePopup()">Cancel</button><button class="popup-confirm" onclick="saveEditedEntry(${jsArg(id)},${jsArg(type)})">Update</button></div>`);
+}
+async function saveEditedEntry(id,type){
+    const found=findPending(id,type);
+    if(!found){closePopup();toast('Entry not found','error');refreshDetail();return;}
+    const f=found.item,spec=editSpec(f),v={};
+    spec.forEach(x=>{v[x.id]=gv('ed_'+x.id);});
+    if(spec.some(x=>x.req&&!v[x.id]))return fail('Please fill all required fields!');
+    if(v.mobile!==undefined){
+        v.mobile=v.mobile.replace(/[\s-]/g,'');
+        if(v.mobile&&!valMob(v.mobile))return fail('Mobile must be 11 digits starting with 03!');
+    }
+    const changes={...v};delete changes._due;
+    if(f.mode==='process'){
+        const hd=parseDate(v.dateField),idt=parseDate(v.issueDate);
+        if(!hd||!idt)return fail('Please enter valid dates!');
+        if(idt>hd)return fail('Issue date cannot be after the hearing date!');
+        changes.expiresAt=hd.toISOString();
+    }else{
+        if(f.mode==='fileMovement'&&!v.title&&!f.image)return fail('Please enter the case title!');
+        const due=new Date(v._due);
+        if(isNaN(due))return fail('Please enter a valid due date & time!');
+        if(due.getTime()!==new Date(f.expiresAt).getTime()){changes.expiresAt=due.toISOString();changes.duration='Custom';}
+    }
+    // Save, then put the entry in the right list (pending vs overdue) for its new due time
+    const[pendingKey,overdueKey]=found.pair;
+    const lists={[pendingKey]:getArr(pendingKey),[overdueKey]:getArr(overdueKey)};
+    const src=lists[found.key],idx=src.findIndex(x=>x.id===id);
+    const updated={...src[idx],...changes,updatedAt:new Date().toISOString()};
+    src.splice(idx,1);
+    const dst=new Date(updated.expiresAt).getTime()<Date.now()?overdueKey:pendingKey;
+    lists[dst].push(updated);
+    try{
+        await Promise.all([setArr(pendingKey,lists[pendingKey]),setArr(overdueKey,lists[overdueKey])]);
+        closePopup();
+        toast(dst!==found.key?(dst===pendingKey?'✓ Updated — moved back to pending':'✓ Updated — now overdue'):'✓ Entry updated','success');
+    }catch(e){toast('Save failed: '+e.message,'error');}
+    refreshDetail();loadCounts();
+}
+function deletePendingEntry(id,type){
+    const found=findPending(id,type);
+    if(!found){toast('Entry not found','error');refreshDetail();return;}
+    const f=found.item;
+    const name=f.mode==='process'?`${label(f.processType)} — ${f.issuedTo}`:(f.title&&f.title!=='Image Captured'?f.title:f.taskType?label(f.taskType):f.name||'this entry');
+    confirmWithPin('Delete Entry',`Delete "${name}"? This cannot be undone. Enter your PIN to confirm.`,async()=>{
+        const cur=findPending(id,type);if(!cur)return;
+        try{await setArr(cur.key,getArr(cur.key).filter(x=>x.id!==id));toast('Entry deleted','success');}
+        catch(e){toast('Delete failed: '+e.message,'error');}
+        refreshDetail();loadCounts();
+    });
+}
 
 // ============================================================
 //  CONFIRM / RECEIVE / DELETE
@@ -1582,14 +1712,13 @@ function openEnglishFile(fromBack){
     let html=viewHeader('English File',{sub:plural(folders.length,'folder')});
     if(!folders.length)html+=emptyState('📁','No folders yet','Create a folder to start adding documents.');
     html+=folders.map((f,i)=>`<div class="folder-card" data-idx="${i}" onclick="openEnglishFolder(${i})"><div class="folder-icon">📁</div><div class="folder-info"><div class="folder-name">${esc(f.name)}</div><div class="folder-count">${plural((f.documents||[]).length,'document')}</div></div><div class="folder-arrow">›</div></div>`).join('');
-    if(folders.length<10)html+=`<button class="add-folder-btn" onclick="createEngFolder()">＋ Add Folder</button>`;
+    html+=`<button class="add-folder-btn" onclick="createEngFolder()">＋ Add Folder</button>`;
     if(folders.length)html+=hint('Long press on a folder for options');
     attachLP(renderDetail(html),'.folder-card',i=>({type:'folder',category:'englishFile',folderIndex:i}));
 }
 function createEngFolder(){
     promptPopup('New Folder','Folder name','',async name=>{
         const folders=engFolders();
-        if(folders.length>=10){toast('Maximum 10 folders allowed!','error');return;}
         folders.push({name,documents:[],createdAt:new Date().toISOString()});
         await setArr('englishFile_folders',folders);
         openEnglishFile(true);loadCounts();toast('✓ Folder created','success');
@@ -1760,7 +1889,7 @@ function openRecord(fromBack){
     let html=viewHeader('Record',{sub:plural(folders.length,'folder')});
     if(!folders.length)html+=emptyState('📁','No folders yet','Create a monthly folder to start adding cases.');
     html+=folders.map((f,i)=>`<div class="folder-card" data-idx="${i}" onclick="openRecordFolder(${i})"><div class="folder-icon">📁</div><div class="folder-info"><div class="folder-name">${esc(f.month)} ${esc(f.year)}</div><div class="folder-sub">${esc(f.judgeName)}</div><div class="folder-count">${plural((f.cases||[]).length,'case')}</div></div><div class="folder-arrow">›</div></div>`).join('');
-    if(folders.length<20)html+=`<button class="add-folder-btn" onclick="createRecFolder()">＋ Add Folder</button>`;
+    html+=`<button class="add-folder-btn" onclick="createRecFolder()">＋ Add Folder</button>`;
     if(folders.length)html+=hint('Long press on a folder for options');
     attachLP(renderDetail(html),'.folder-card',i=>({type:'folder',category:'record',folderIndex:i}));
 }
@@ -1783,7 +1912,6 @@ async function saveRecFolder(editIdx){
         if(!folders[editIdx])return;
         Object.assign(folders[editIdx],{month,year,judgeName});
     }else{
-        if(folders.length>=20){toast('Maximum 20 folders allowed!','error');return;}
         folders.push({month,year,judgeName,cases:[],createdAt:new Date().toISOString()});
     }
     try{
@@ -1983,7 +2111,7 @@ function renderProcessItem(file,type,isRet,isOvr){
     const head=`<div class="info-head">Hearing Date: ${fmtDate(file.dateField)}</div>`;
     const warn=(!isRet&&isOvr)?`<div class="overdue-warning">⚠ Hearing date reached — service report not received</div>`:'';
     let actions=file.mobile?`<button class="action-btn call-btn" onclick="makeCall(${jsArg(file.mobile)})">📞 Call</button>`:'';
-    if(!isRet)actions+=`<button class="action-btn receive-btn" onclick="confirmReceive(${jsArg(fid)},${jsArg(type)},${jsArg(title)},'')">📋 Add Report</button>`;
+    if(!isRet)actions+=`<button class="action-btn receive-btn" onclick="confirmReceive(${jsArg(fid)},${jsArg(type)},${jsArg(title)},'')">📋 Add Report</button>`+moreBtn(fid,type);
     else{
         if(!served)actions+=`<button class="action-btn receive-btn" onclick="reissueProcess(${jsArg(fid)})">🔁 Re-issue</button>`;
         actions+=`<button class="action-btn delete-btn" onclick="confirmDelete(${jsArg(fid)},${jsArg(type)},${jsArg(title)})">🗑 Delete</button>`;
@@ -2035,19 +2163,76 @@ async function saveReissue(id){
 // ============================================================
 //  IMPORT / EXPORT
 // ============================================================
-function exportData(){
+const BACKUP_REMIND_DAYS=7;
+// Ask the browser not to auto-clear our storage when the phone runs low on space
+async function requestPersistentStorage(){
+    try{if(navigator.storage&&navigator.storage.persist&&!(await navigator.storage.persisted()))await navigator.storage.persist();}
+    catch(e){console.warn('Persistent storage request failed',e);}
+}
+function hasAnyData(){return DATA_KEYS.some(k=>{const v=cacheGet(k);return v&&v!=='[]';});}
+function daysSinceBackup(){const l=cacheGet('lastBackupAt');return l?Math.floor((Date.now()-new Date(l))/86400000):null;}
+function lastBackupText(){
+    const d=daysSinceBackup();
+    if(d===null)return'⚠ No backup taken yet';
+    return`Last backup: ${d===0?'today':d===1?'yesterday':plural(d,'day')+' ago'}`;
+}
+function updateBackupBanner(){
+    const el=document.getElementById('backupBanner');if(!el)return;
+    const d=daysSinceBackup(),snoozed=Date.now()<+(cacheGet('backupSnoozeUntil')||0);
+    const show=hasAnyData()&&!snoozed&&(d===null||d>=BACKUP_REMIND_DAYS);
+    el.innerHTML=show?`<div class="backup-banner" role="alert"><div><strong>💾 Backup reminder</strong><span>${d===null?'You have not taken any backup yet.':`Your last backup was ${plural(d,'day')} ago.`} If this phone is lost or reset, your data cannot be recovered.</span></div>
+<div class="bb-actions"><button class="bb-primary" onclick="openBackup()">Backup Now</button><button class="bb-later" onclick="snoozeBackup()">Later</button></div></div>`:'';
+    const lt=document.getElementById('lastBackupText');if(lt)lt.textContent=lastBackupText();
+}
+function snoozeBackup(){dbSet('backupSnoozeUntil',String(Date.now()+86400000)).catch(console.error);updateBackupBanner();}
+function backupJSON(){
+    const data={app:'Muhafiz',exportDate:new Date().toISOString()};
+    DATA_KEYS.forEach(k=>{data[k]=getArr(k);});
+    return JSON.stringify(data);
+}
+async function markBackupDone(){
+    try{await dbSet('lastBackupAt',new Date().toISOString());}catch(e){console.error(e);}
+    updateBackupBanner();
+}
+function openBackup(){
     closeSidebar();
+    showEntryPopup(`<h2 class="popup-title">💾 Backup</h2>
+<p class="popup-sub">${lastBackupText()}<br><span id="storageInfo"></span></p>
+<p class="popup-sub">Save the backup outside this phone — e.g. send it to your own WhatsApp or save it to Google Drive.</p>
+<div class="popup-actions stack">
+    ${navigator.share?'<button class="popup-confirm" onclick="shareBackup()">📤 Share Backup (WhatsApp / Drive)</button>':''}
+    <button class="popup-confirm${navigator.share?' violet':''}" onclick="downloadBackup()">⬇️ Download Backup File</button>
+    <button class="popup-cancel" onclick="closePopup()">Cancel</button>
+</div>`,false);
+    if(navigator.storage&&navigator.storage.estimate){
+        navigator.storage.estimate().then(e=>{const el=document.getElementById('storageInfo');if(el&&e.usage)el.textContent=`Data size: ${(e.usage/1048576).toFixed(1)} MB`;}).catch(()=>{});
+    }
+}
+async function shareBackup(){
+    const name=`muhafiz-backup-${todayISO()}`;
+    showLoading('Preparing backup...');
+    let json;
+    try{json=backupJSON();}catch(e){hideLoading();toast('Backup failed: '+e.message,'error');return;}
+    hideLoading();
+    // Some Android versions only allow sharing .txt files; restore accepts both
+    let file=new File([json],name+'.json',{type:'application/json'});
+    if(!(navigator.canShare&&navigator.canShare({files:[file]})))file=new File([json],name+'.txt',{type:'text/plain'});
+    if(!(navigator.canShare&&navigator.canShare({files:[file]}))){toast('Sharing files is not supported here — use Download','error');return;}
     try{
-        const data={app:'Muhafiz',exportDate:new Date().toISOString()};
-        DATA_KEYS.forEach(k=>{data[k]=getArr(k);});
-        const blob=new Blob([JSON.stringify(data)],{type:'application/json'});
+        await navigator.share({files:[file],title:'Muhafiz Backup'});
+        closePopup();await markBackupDone();toast('✓ Backup shared','success');
+    }catch(e){if(e.name!=='AbortError')toast('Share failed: '+e.message,'error');}
+}
+async function downloadBackup(){
+    try{
+        const blob=new Blob([backupJSON()],{type:'application/json'});
         const url=URL.createObjectURL(blob);
         const a=document.createElement('a');
         a.href=url;a.download=`muhafiz-backup-${todayISO()}.json`;
         document.body.appendChild(a);a.click();a.remove();
         setTimeout(()=>URL.revokeObjectURL(url),10000);
-        toast('✓ Backup downloaded','success');
-    }catch(e){toast('Export failed: '+e.message,'error');}
+        closePopup();await markBackupDone();toast('✓ Backup downloaded','success');
+    }catch(e){toast('Backup failed: '+e.message,'error');}
 }
 function importData(){closeSidebar();document.getElementById('importFileInput').click();}
 function handleImportFile(e){
