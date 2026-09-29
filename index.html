@@ -8,8 +8,14 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <meta name="apple-mobile-web-app-title" content="Muhafiz">
     <meta name="description" content="Muhafiz Office Management - File Movement and Document Management System">
-    <meta name="theme-color" content="#1d4ed8" media="(prefers-color-scheme: light)">
-    <meta name="theme-color" content="#0b1220" media="(prefers-color-scheme: dark)">
+    <meta name="theme-color" content="#1d4ed8" id="themeColorMeta">
+    <script>
+        // Apply saved theme before first paint: 'auto' (follow phone), 'light' or 'dark'
+        (function(){
+            var t='auto';try{t=localStorage.getItem('theme')||'auto';}catch(e){}
+            if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t);
+        })();
+    </script>
     <link rel="manifest" href="manifest.json">
     <link rel="icon" href="icon-192.png">
     <link rel="apple-touch-icon" href="icon-192.png">
@@ -47,9 +53,11 @@
             --ease:cubic-bezier(0.4,0,0.2,1);
             --safe-t:env(safe-area-inset-top,0px);
             --safe-b:env(safe-area-inset-bottom,0px);
+            --accent-text:#1d4ed8;
+            --toast-bg:#0f1f3d;--toast-fg:#fff;
         }
-        @media (prefers-color-scheme:dark){
-            :root{
+        /* Dark theme: user picked Dark, or picked Auto and the phone is in dark mode */
+        :root[data-theme="dark"]{
                 color-scheme:dark;
                 --bg:#0b1220;
                 --bg-gradient:linear-gradient(160deg,#0b1220 0%,#0f1a2e 60%,#0c1526 100%);
@@ -75,6 +83,38 @@
                 --shadow:0 4px 18px rgba(0,0,0,0.35);
                 --shadow-lg:0 14px 44px rgba(0,0,0,0.55);
                 --overlay:rgba(0,0,0,0.62);
+                --accent-text:var(--blue);
+                --toast-bg:#e6edf8;--toast-fg:#0f1f3d;
+        }
+        @media (prefers-color-scheme:dark){
+            :root:not([data-theme="light"]){
+                color-scheme:dark;
+                --bg:#0b1220;
+                --bg-gradient:linear-gradient(160deg,#0b1220 0%,#0f1a2e 60%,#0c1526 100%);
+                --surface:#131d31;
+                --surface-2:#1b2740;
+                --surface-glass:rgba(19,29,49,0.94);
+                --border:#24324d;
+                --border-strong:#34465f;
+                --text:#e6edf8;
+                --text-2:#a3b3cb;
+                --text-3:#71839e;
+                --accent:#3b6af0;
+                --accent-hover:#2f5bd9;
+                --accent-soft:rgba(79,124,255,0.16);
+                --accent-glow:rgba(79,124,255,0.3);
+                --blue:#82a6ff;     --blue-soft:rgba(79,124,255,0.16);
+                --red:#f87171;      --red-soft:rgba(248,113,113,0.14); --red-text:#fca5a5;
+                --green:#4ade80;    --green-soft:rgba(74,222,128,0.14);
+                --emerald:#34d399;  --emerald-soft:rgba(52,211,153,0.14);
+                --amber:#fbbf24;    --amber-soft:rgba(251,191,36,0.14);
+                --violet:#b39dfb;   --violet-soft:rgba(167,139,250,0.16);
+                --shadow-sm:0 1px 2px rgba(0,0,0,0.3);
+                --shadow:0 4px 18px rgba(0,0,0,0.35);
+                --shadow-lg:0 14px 44px rgba(0,0,0,0.55);
+                --overlay:rgba(0,0,0,0.62);
+                --accent-text:var(--blue);
+                --toast-bg:#e6edf8;--toast-fg:#0f1f3d;
             }
         }
 
@@ -135,9 +175,8 @@
         .mode-chip{
             display:inline-flex;align-items:center;gap:6px;margin:-4px 0 14px 2px;
             padding:5px 12px;border-radius:999px;font-size:12.5px;font-weight:650;
-            background:var(--accent-soft);color:var(--accent);
+            background:var(--accent-soft);color:var(--accent-text);
         }
-        @media (prefers-color-scheme:dark){.mode-chip{color:var(--blue);}}
 
         /* ── DASHBOARD CARDS ── */
         .cards{display:grid;gap:12px;}
@@ -224,8 +263,10 @@
         }
         .menu-item:active{background:var(--surface-2);}
         @media (hover:hover){.menu-item:hover{background:var(--surface-2);}}
-        .menu-item.active{background:var(--accent-soft);color:var(--accent);font-weight:700;}
-        @media (prefers-color-scheme:dark){.menu-item.active{color:var(--blue);}}
+        .menu-item.active{background:var(--accent-soft);color:var(--accent-text);font-weight:700;}
+        .theme-switch{display:flex;gap:4px;margin:4px 12px 6px;padding:4px;border-radius:12px;background:var(--surface-2);border:1px solid var(--border);}
+        .theme-switch button{flex:1;padding:9px 4px;border:none;border-radius:9px;background:none;cursor:pointer;font-size:13px;font-weight:650;color:var(--text-2);transition:background 0.15s,color 0.15s;}
+        .theme-switch button[aria-pressed="true"]{background:var(--surface);color:var(--accent-text);box-shadow:var(--shadow-sm);}
         .sidebar-footer{margin-top:auto;padding:14px 20px;font-size:11.5px;color:var(--text-3);text-align:center;}
 
         /* ── FULL-SCREEN VIEWS ── */
@@ -255,8 +296,7 @@
         .capture-box:active{border-color:var(--accent);background:var(--accent-soft);}
         .capture-box.has-img{border-style:solid;border-color:var(--emerald);}
         .camera-icon{font-size:34px;}
-        .capture-text{color:var(--accent);font-size:14px;font-weight:650;}
-        @media (prefers-color-scheme:dark){.capture-text{color:var(--blue);}}
+        .capture-text{color:var(--accent-text);font-size:14px;font-weight:650;}
         .captured-img{max-width:100%;max-height:200px;border-radius:10px;box-shadow:var(--shadow-sm);}
         .input-field{margin-bottom:18px;}
         .input-field:last-child{margin-bottom:0;}
@@ -286,10 +326,9 @@
         }
         .duration-btn{
             width:44px;height:44px;border:none;border-radius:9px;cursor:pointer;
-            background:var(--accent-soft);color:var(--accent);font-size:24px;font-weight:600;
+            background:var(--accent-soft);color:var(--accent-text);font-size:24px;font-weight:600;
             transition:transform 0.12s;
         }
-        @media (prefers-color-scheme:dark){.duration-btn{color:var(--blue);}}
         .duration-btn:active{transform:scale(0.9);}
         .duration-value{font-size:17px;font-weight:700;color:var(--text);}
         .custom-dur{margin-top:10px;}
@@ -462,23 +501,21 @@
         }
         .context-menu-item:last-child{border-bottom:none;}
         .context-menu-item:active{background:var(--surface-2);}
-        .context-menu-item.edit{color:var(--accent);}
+        .context-menu-item.edit{color:var(--accent-text);}
         .context-menu-item.share{color:var(--emerald);}
         .context-menu-item.delete{color:var(--red);}
-        @media (prefers-color-scheme:dark){.context-menu-item.edit{color:var(--blue);}}
 
         /* ── TOAST ── */
         .toast{
             position:fixed;left:50%;bottom:calc(24px + var(--safe-b));z-index:10000;
             transform:translate(-50%,20px);opacity:0;pointer-events:none;
             max-width:min(92vw,420px);padding:12px 18px;border-radius:12px;
-            background:#0f1f3d;color:#fff;font-size:14px;font-weight:600;text-align:center;
+            background:var(--toast-bg);color:var(--toast-fg);font-size:14px;font-weight:600;text-align:center;
             box-shadow:var(--shadow-lg);transition:opacity 0.2s,transform 0.2s var(--ease);
         }
         .toast.show{opacity:1;transform:translate(-50%,0);}
-        .toast.success{background:#047857;}
-        .toast.error{background:#b91c1c;}
-        @media (prefers-color-scheme:dark){.toast{background:#e6edf8;color:#0f1f3d;}.toast.success{background:#059669;color:#fff;}.toast.error{background:#dc2626;color:#fff;}}
+        .toast.success{background:#047857;color:#fff;}
+        .toast.error{background:#b91c1c;color:#fff;}
 
         /* ── LOADING OVERLAY ── */
         .loading-overlay{
@@ -836,7 +873,7 @@ document.addEventListener('DOMContentLoaded',async()=>{
     showLoading('Loading...');
     try{
         await dbLoadAll();
-        loadSettings();renderDashboard();renderSidebar();
+        applyTheme();loadSettings();renderDashboard();renderSidebar();
         await runOverdueChecks();
         loadCounts();
         setInterval(runOverdueChecks,30000);
@@ -971,6 +1008,14 @@ function renderSidebar(){
         <button class="menu-item" id="menuProcessing" onclick="selectMode('processing','summons')">⚖️ Processing (اجرائی)</button>
     </div>
     <div class="sb-section">
+        <span class="sb-section-title">Appearance</span>
+        <div class="theme-switch" role="group" aria-label="Theme">
+            <button data-theme-opt="auto" onclick="setTheme('auto')">📱 Auto</button>
+            <button data-theme-opt="light" onclick="setTheme('light')">☀️ Light</button>
+            <button data-theme-opt="dark" onclick="setTheme('dark')">🌙 Dark</button>
+        </div>
+    </div>
+    <div class="sb-section">
         <span class="sb-section-title">Security</span>
         <button class="menu-item" onclick="openChangePin()">🔒 Change PIN</button>
     </div>
@@ -980,7 +1025,7 @@ function renderSidebar(){
         <button class="menu-item" onclick="exportData()">📤 Export Data</button>
     </div>
     <div class="sidebar-footer">Data is stored securely on this device only.<br>Export a backup regularly.</div>`;
-    updateMenuSel();
+    updateMenuSel();updateThemeButtons();
 }
 function openSidebar(){
     const m=document.getElementById('sidebarMenu');
@@ -991,6 +1036,29 @@ function closeSidebar(){
     document.getElementById('sidebarMenu').classList.remove('active');
     document.getElementById('sidebarOverlay').classList.remove('active');
 }
+
+// ============================================================
+//  THEME (Auto / Light / Dark) — saved per device
+// ============================================================
+const darkMQ=window.matchMedia('(prefers-color-scheme: dark)');
+function getTheme(){try{return localStorage.getItem('theme')||'auto';}catch(e){return'auto';}}
+function isDarkActive(){const t=getTheme();return t==='dark'||(t==='auto'&&darkMQ.matches);}
+function applyTheme(){
+    const t=getTheme(),root=document.documentElement;
+    if(t==='auto')root.removeAttribute('data-theme');else root.setAttribute('data-theme',t);
+    document.getElementById('themeColorMeta').setAttribute('content',isDarkActive()?'#0b1220':'#1d4ed8');
+    updateThemeButtons();
+}
+function setTheme(t){
+    try{localStorage.setItem('theme',t);}catch(e){}
+    applyTheme();
+    toast({auto:'📱 Theme follows phone setting',light:'☀️ Light mode on',dark:'🌙 Dark mode on'}[t]);
+}
+function updateThemeButtons(){
+    const t=getTheme();
+    document.querySelectorAll('[data-theme-opt]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.themeOpt===t)));
+}
+darkMQ.addEventListener?darkMQ.addEventListener('change',applyTheme):darkMQ.addListener(applyTheme);
 
 // ============================================================
 //  FORM
