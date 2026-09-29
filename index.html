@@ -15,6 +15,11 @@
             var t='auto';try{t=localStorage.getItem('theme')||'auto';}catch(e){}
             if(t==='light'||t==='dark')document.documentElement.setAttribute('data-theme',t);
         })();
+        // Chrome fires this once, early — keep it so "Install App" can show Chrome's own install popup
+        window.__installPrompt=null;
+        window.addEventListener('beforeinstallprompt',function(e){
+            e.preventDefault();window.__installPrompt=e;window.dispatchEvent(new Event('muhafiz-installable'));
+        });
     </script>
     <link rel="manifest" href="manifest.json">
     <link rel="icon" href="icon-192.png">
@@ -2070,36 +2075,68 @@ function shareRecordCase(fi,ci){
 // ============================================================
 //  INSTALL APP (PWA)
 // ============================================================
-let _installPrompt=null;
 // True when running as an installed app (home-screen PWA, fullscreen, or Play Store TWA)
 function isAppInstalled(){
     return ['standalone','fullscreen','minimal-ui'].some(m=>window.matchMedia(`(display-mode: ${m})`).matches)
         ||navigator.standalone===true||document.referrer.startsWith('android-app://');
 }
+const UA=navigator.userAgent;
+const IS_IOS=/iphone|ipad|ipod/i.test(UA);
+const IS_ANDROID=/android/i.test(UA);
+// Real Chrome (not WebView / WhatsApp / Facebook in-app browser / other browsers)
+const IS_CHROME=/Chrome\/\d/.test(UA)&&!/; wv\)|EdgA|SamsungBrowser|OPR|YaBrowser|FBAN|FBAV|Instagram|Line\//.test(UA);
 function setupInstall(){
-    window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();_installPrompt=e;});
     window.addEventListener('appinstalled',()=>{
-        _installPrompt=null;
+        window.__installPrompt=null;
         const sec=document.getElementById('installSection');if(sec)sec.hidden=true;
+        closePopup();
         toast('✓ App installed — open it from your home screen','success');
+    });
+}
+// Wait briefly for Chrome's install event (if the button is tapped right after opening)
+function waitForInstallPrompt(ms){
+    if(window.__installPrompt)return Promise.resolve(window.__installPrompt);
+    return new Promise(res=>{
+        const done=()=>{clearTimeout(t);window.removeEventListener('muhafiz-installable',done);res(window.__installPrompt);};
+        const t=setTimeout(done,ms);
+        window.addEventListener('muhafiz-installable',done);
     });
 }
 async function installApp(){
     closeSidebar();
     if(isAppInstalled()){toast('App is already installed','success');return;}
-    if(_installPrompt){
-        _installPrompt.prompt();
-        try{const{outcome}=await _installPrompt.userChoice;if(outcome==='accepted')_installPrompt=null;}catch(e){}
+    if(!window.__installPrompt&&!IS_IOS){showLoading('Preparing install...');await waitForInstallPrompt(2500);hideLoading();}
+    const ev=window.__installPrompt;
+    if(ev){
+        try{
+            await ev.prompt();  // Chrome's own "Install app" popup
+            const{outcome}=await ev.userChoice;
+            window.__installPrompt=null;  // an install prompt can only be used once
+            if(outcome!=='accepted')toast('Install cancelled — you can install any time from the menu');
+        }catch(e){showInstallHelp();}
         return;
     }
-    // No automatic prompt available (iPhone, already installed, or browser doesn't support it)
-    const ios=/iphone|ipad|ipod/i.test(navigator.userAgent);
-    showEntryPopup(`<h2 class="popup-title">📲 Install App</h2>
-<p class="popup-sub">Install Muhafiz on your home screen to open it like a normal app — full screen and it works offline.</p>
-<div class="kv">${ios
-    ?`<div class="kv-row"><span>1.</span><strong>Open this page in Safari</strong></div><div class="kv-row"><span>2.</span><strong>Tap Share ⬆️ at the bottom</strong></div><div class="kv-row"><span>3.</span><strong>Tap "Add to Home Screen"</strong></div>`
-    :`<div class="kv-row"><span>1.</span><strong>Open this page in Chrome</strong></div><div class="kv-row"><span>2.</span><strong>Tap the ⋮ menu (top right)</strong></div><div class="kv-row"><span>3.</span><strong>Tap "Install app" or "Add to Home screen"</strong></div>`}</div>
-<div class="popup-actions"><button class="popup-confirm" onclick="closePopup()">OK</button></div>`,false);
+    showInstallHelp();
+}
+// Opens this same page in Chrome (Android intent link) — used when inside WhatsApp etc.
+function openInChrome(){
+    location.href=`intent://${location.host}${location.pathname}#Intent;scheme=https;package=com.android.chrome;end`;
+}
+function showInstallHelp(){
+    const step=(n,t)=>`<div class="kv-row"><span>${n}.</span><strong>${t}</strong></div>`;
+    let body;
+    if(IS_IOS){
+        body=`<p class="popup-sub">On iPhone, apps are installed from Safari:</p><div class="kv">${step(1,'Open this page in Safari')}${step(2,'Tap Share ⬆️ at the bottom')}${step(3,'Tap "Add to Home Screen"')}</div>`;
+    }else if(IS_ANDROID&&!IS_CHROME){
+        body=`<p class="popup-sub">This page is open inside another app. Open it in Chrome to install:</p>
+<div class="popup-actions stack"><button class="popup-confirm" onclick="openInChrome()">🌐 Open in Chrome</button></div>
+<p class="popup-sub" style="margin-top:12px">Then tap <strong>☰ → 📲 Install App</strong> again.</p>`;
+    }else{
+        body=`<p class="popup-sub">Chrome did not offer the install popup. The app may <strong>already be installed</strong> — check your home screen and app list for "Muhafiz".</p>
+<p class="popup-sub">Otherwise install it from Chrome's menu:</p><div class="kv">${step(1,'Tap the ⋮ menu (top right)')}${step(2,'Tap "Install app" or "Add to Home screen"')}</div>`;
+    }
+    showEntryPopup(`<h2 class="popup-title">📲 Install App</h2>${body}
+<div class="popup-actions"><button class="popup-cancel" onclick="closePopup()">Close</button></div>`,false);
 }
 
 // ============================================================
