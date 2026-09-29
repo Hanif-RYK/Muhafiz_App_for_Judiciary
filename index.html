@@ -611,8 +611,9 @@
 // ============================================================
 const DB_NAME='MuhafizDB',DB_VER=1,STORE='appData';
 const DATA_KEYS=['filesOut','overdueFiles','returnedFiles','pendingTasks','overdueTasks','completedTasks',
-    'materialsOut','materialsOverdue','materialsReturned','englishFile_folders','bailBonds','record_folders',
-    'processPending','processOverdue','processServed'];
+    'materialsOut','materialsOverdue','materialsReturned','englishFile_folders','bailBonds','record_folders'];
+// Removed "Processing" feature — its old data is cleaned up once at startup
+const OBSOLETE_KEYS=['processPending','processOverdue','processServed'];
 const DEFAULT_PIN='0000';  // used until the user sets their own PIN
 let _db=null;
 const _cache={};  // sync read cache populated at startup
@@ -639,6 +640,10 @@ async function dbSet(key,value){
         tx.onerror=()=>rej(tx.error);
         tx.onabort=()=>rej(tx.error||new Error('Storage transaction aborted'));
     });
+}
+function dbDelete(key){
+    delete _cache[key];
+    return openDB().then(db=>new Promise(res=>{const tx=db.transaction(STORE,'readwrite');tx.objectStore(STORE).delete(key);tx.oncomplete=tx.onerror=()=>res();}));
 }
 async function dbLoadAll(){
     const db=await openDB();
@@ -741,28 +746,17 @@ const DUR_MINS={'5 Mins':5,'15 Mins':15,'30 Mins':30,'1 Hour':60,'2 Hours':120,'
 const LABELS={
     document:'Document Preparation',meeting:'Meeting',research:'Research',filing:'Filing',others:'Others',
     staff:'Staff',official:'Official',advocate:'Advocate',clerk_advocate:'Clerk Advocate',munshi:'Munshi',
-    civil:'Civil',criminal:'Criminal',execution:'Execution',miscellaneous:'Miscellaneous',
-    // Processing (summons / notices)
-    summons:'Summons',notice:'Notice',bailable_warrant:'Bailable Warrant',non_bailable_warrant:'Non-Bailable Warrant',proclamation:'Proclamation',
-    plaintiff:'Plaintiff / Petitioner',defendant:'Defendant / Respondent',accused:'Accused',witness:'Witness',
-    served_personal:'Served (Personally)',served_affixation:'Served (Affixation)',refused:'Refused to Accept',
-    not_found:'Not Found / Address Incomplete',unexecuted:'Returned Unexecuted',other:'Other'
+    civil:'Civil',criminal:'Criminal',execution:'Execution',miscellaneous:'Miscellaneous'
 };
 const NATURES=['civil','criminal','execution','miscellaneous','others'];
-const PROCESS_TYPES=['summons','notice','bailable_warrant','non_bailable_warrant','proclamation','others'];
-const PARTY_ROLES=['plaintiff','defendant','accused','witness','others'];
-const REPORT_RESULTS=['served_personal','served_affixation','refused','not_found','unexecuted','other'];
-const SERVED_RESULTS=['served_personal','served_affixation'];
 const LIST_TITLES={filesOut:'Files Out',overdueFiles:'Overdue Files',returnedFiles:'Returned Files',
     pendingTasks:'Pending Tasks',overdueTasks:'Overdue Tasks',completedTasks:'Completed Tasks',
-    materialsOut:'Materials Out',materialsOverdue:'Overdue Materials',materialsReturned:'Returned Materials',
-    processPending:'Pending Process',processOverdue:'Report Due',processServed:'Reported Process'};
-const RETURNED_TYPES=['returnedFiles','completedTasks','materialsReturned','processServed'];
-const OVERDUE_TYPES=['overdueFiles','overdueTasks','materialsOverdue','processOverdue'];
-const OVERDUE_PAIRS=[['filesOut','overdueFiles'],['pendingTasks','overdueTasks'],['materialsOut','materialsOverdue'],['processPending','processOverdue']];
+    materialsOut:'Materials Out',materialsOverdue:'Overdue Materials',materialsReturned:'Returned Materials'};
+const RETURNED_TYPES=['returnedFiles','completedTasks','materialsReturned'];
+const OVERDUE_TYPES=['overdueFiles','overdueTasks','materialsOverdue'];
+const OVERDUE_PAIRS=[['filesOut','overdueFiles'],['pendingTasks','overdueTasks'],['materialsOut','materialsOverdue']];
 const RECEIVE_TARGET={filesOut:'returnedFiles',overdueFiles:'returnedFiles',pendingTasks:'completedTasks',
-    overdueTasks:'completedTasks',materialsOut:'materialsReturned',materialsOverdue:'materialsReturned',
-    processPending:'processServed',processOverdue:'processServed'};
+    overdueTasks:'completedTasks',materialsOut:'materialsReturned',materialsOverdue:'materialsReturned'};
 const MONTHS=['January','February','March','April','May','June','July','August','September','October','November','December'];
 const LP_DUR=550;
 let durIdx=3,curMode='fileMovement',curType='picture';
@@ -902,6 +896,8 @@ document.addEventListener('DOMContentLoaded',async()=>{
         setInterval(()=>{refreshTimers();updateDate();},30000);
         setupGlobalListeners();
         requestPersistentStorage();
+        OBSOLETE_KEYS.forEach(k=>{if(k in _cache)dbDelete(k).catch(console.error);});
+        setupInstall();
     }catch(e){
         console.error(e);
         dash.innerHTML=`<div class="wrap"><div class="form-section"><h2 class="popup-title">Something went wrong</h2><p class="popup-sub">${esc(e&&e.message||e)}</p><button class="save-btn" style="width:100%" onclick="location.reload()">Reload</button></div></div>`;
@@ -935,6 +931,7 @@ function setupGlobalListeners(){
 // ============================================================
 function loadSettings(){
     curMode=cacheGet('currentMode')||'fileMovement';curType=cacheGet('currentEntryType')||'picture';
+    if(!['fileMovement','office','myDocument'].includes(curMode)){curMode='fileMovement';curType='picture';}  // e.g. removed 'processing'
     if(curMode==='fileMovement'&&curType!=='title')curType='picture';  // 'file' from the old merged form
 }
 function selectMode(m,t){
@@ -947,11 +944,10 @@ function selectMode(m,t){
 function dashKey(){
     if(curMode==='office')return curType==='assignedTask'?'task':'material';
     if(curMode==='myDocument')return'myDocument';
-    if(curMode==='processing')return'processing';
     return'fileMovement';
 }
 function updateMenuSel(){
-    const ids={fileMovement:curType==='title'?'menuFileTitle':'menuFilePicture',task:'menuAssignedTask',material:'menuMaterialMovement',myDocument:'menuMyDocument',processing:'menuProcessing'};
+    const ids={fileMovement:curType==='title'?'menuFileTitle':'menuFilePicture',task:'menuAssignedTask',material:'menuMaterialMovement',myDocument:'menuMyDocument'};
     document.querySelectorAll('.menu-item').forEach(i=>{i.classList.remove('active');i.removeAttribute('aria-current');});
     const el=document.getElementById(ids[dashKey()]);
     if(el){el.classList.add('active');el.setAttribute('aria-current','page');}
@@ -973,10 +969,6 @@ const DASH={
         ['materials-out',"openDetailView('materialsOut')",'Materials Out','materialsOut','📦'],
         ['materials-overdue',"openDetailView('materialsOverdue')",'Overdue Materials','materialsOverdue','⚠️'],
         ['materials-returned',"openDetailView('materialsReturned')",'Returned Materials','materialsReturned','✅']]},
-    processing:{title:'Processing (اجرائی)',btn:'New Process Entry',cards:[
-        ['pending',"openDetailView('processPending')",'Pending Process','processPending','📨'],
-        ['overdue',"openDetailView('processOverdue')",'Report Due','processOverdue','⏰'],
-        ['completed',"openDetailView('processServed')",'Reported','processServed','📋']]},
     myDocument:{title:'My Documents',btn:null,cards:[
         ['english-file','openEnglishFile()','English File','englishFile','📘'],
         ['bail-bonds','openBailBonds()','Bail Bonds','bailBonds','⚖️'],
@@ -1030,7 +1022,6 @@ function renderSidebar(){
     <div class="sb-section">
         <span class="sb-section-title">Documents</span>
         <button class="menu-item" id="menuMyDocument" onclick="selectMode('myDocument','view')">📁 My Documents</button>
-        <button class="menu-item" id="menuProcessing" onclick="selectMode('processing','summons')">⚖️ Processing (اجرائی)</button>
     </div>
     <div class="sb-section">
         <span class="sb-section-title">Appearance</span>
@@ -1039,6 +1030,10 @@ function renderSidebar(){
             <button data-theme-opt="light" onclick="setTheme('light')">☀️ Light</button>
             <button data-theme-opt="dark" onclick="setTheme('dark')">🌙 Dark</button>
         </div>
+    </div>
+    <div class="sb-section" id="installSection"${isAppInstalled()?' hidden':''}>
+        <span class="sb-section-title">App</span>
+        <button class="menu-item" onclick="installApp()">📲 Install App</button>
     </div>
     <div class="sb-section">
         <span class="sb-section-title">Security</span>
@@ -1095,22 +1090,22 @@ function handleNewEntry(){
 }
 function renderForm(){
     const k=dashKey();
-    const isTask=k==='task',isMat=k==='material',isProc=k==='processing';
-    const title=isProc?'New Process Entry':isTask?'New Task':isMat?'New Material Entry':'New File Entry';
-    const sub=isProc?'Processing · Summons / Notices':isTask?'Assigned Task':isMat?'Office Materials':(curType==='title'?'File Movement · Title':'File Movement · Picture');
-    const fields=isProc?processFields():isTask?taskFields():isMat?matFields():curType==='title'?titleFields():picFields();
+    const isTask=k==='task',isMat=k==='material';
+    const title=isTask?'New Task':isMat?'New Material Entry':'New File Entry';
+    const sub=isTask?'Assigned Task':isMat?'Office Materials':(curType==='title'?'File Movement · Title':'File Movement · Picture');
+    const fields=isTask?taskFields():isMat?matFields():curType==='title'?titleFields():picFields();
     document.getElementById('formContainer').innerHTML=`<div class="wrap">
 <header class="header view-header"><button class="back-btn" onclick="goBack()" aria-label="Back">←</button><div class="header-content"><h1>${title}</h1><div class="date">${sub}</div></div></header>
 <div class="form-section">${fields}</div>
 <div class="form-actions"><button class="cancel-btn" onclick="goBack()">Cancel</button><button class="save-btn" id="saveBtn" onclick="saveEntry()">Save Entry 💾</button></div></div>`;
     setupCamListener();
 }
-function selectField(id,lbl,opts,onchange=''){
-    return`<div class="input-field"><label for="${id}">${lbl} <span class="required">*</span></label><select id="${id}"${onchange?` onchange="${onchange}"`:''}><option value="">Select</option>${opts.map(o=>`<option value="${o}">${label(o)}</option>`).join('')}</select></div>`;
+function selectField(id,lbl,opts,selected=''){
+    return`<div class="input-field"><label for="${id}">${lbl} <span class="required">*</span></label><select id="${id}"><option value="">Select</option>${opts.map(o=>`<option value="${o}"${o===selected?' selected':''}>${label(o)}</option>`).join('')}</select></div>`;
 }
 function personFields(){
-    return`<div class="input-field" id="nameField" hidden><label for="name">Name <span class="required">*</span></label><input type="text" id="name" autocomplete="name" maxlength="60"></div>
-<div class="input-field" id="mobileField" hidden><label for="mobile">Mobile <span class="required">*</span></label>${mobileInput('<input type="tel" id="mobile" placeholder="03XXXXXXXXX" inputmode="numeric" maxlength="13" autocomplete="tel">','name','mobile')}</div>`;
+    return`<div class="input-field" id="nameField"><label for="name">Name <span class="required">*</span></label>${withContact('<input type="text" id="name" autocomplete="name" maxlength="60" placeholder="Type or pick a contact">','name','mobile')}</div>
+<div class="input-field" id="mobileField"><label for="mobile">Mobile <span class="required">*</span></label><input type="tel" id="mobile" placeholder="03XXXXXXXXX" inputmode="numeric" maxlength="13" autocomplete="tel"></div>`;
 }
 function durationField(){
     const isCustom=DURATIONS[durIdx]==='Enter Date';
@@ -1124,19 +1119,19 @@ const hearingField=()=>`<div class="input-field"><label for="dateField">Hearing 
 function taskFields(){
     return selectField('taskType','Task Type',['document','meeting','research','filing','others'])+
 `<div class="input-field"><label for="taskDetails">Task Details <span class="required">*</span></label><textarea id="taskDetails" placeholder="Enter task details" maxlength="1000"></textarea></div>`+
-        selectField('assignedTo','Assigned To',['staff','official','advocate','clerk_advocate','others'],'toggleFields()')+personFields()+durationField();
+        selectField('assignedTo','Assigned To',['staff','official','advocate','clerk_advocate','others'])+personFields()+durationField();
 }
 function matFields(){
     return captureBox(true)+`<div class="input-field"><label for="materialDetails">Material Details</label><textarea id="materialDetails" placeholder="Enter material details" maxlength="1000"></textarea></div>`+
-        selectField('takenBy','Taken By',['staff','official','advocate','clerk_advocate','others'],'toggleFields()')+personFields()+durationField();
+        selectField('takenBy','Taken By',['staff','official','advocate','clerk_advocate','others'])+personFields()+durationField();
 }
 function picFields(){
-    return captureBox(false)+hearingField()+selectField('takenBy','Taken By',['advocate','munshi','staff','others'],'toggleFields()')+personFields()+durationField();
+    return captureBox(false)+hearingField()+selectField('takenBy','Taken By',['munshi','advocate','staff','others'],'munshi')+personFields()+durationField();
 }
 function titleFields(){
     return`<div class="input-field"><label for="title">Case Title <span class="required">*</span></label><input type="text" id="title" placeholder="Enter case title" maxlength="150"></div>`+
         selectField('nature','Case Nature',NATURES)+hearingField()+
-        selectField('takenBy','Taken By',['advocate','munshi','staff','others'],'toggleFields()')+personFields()+durationField();
+        selectField('takenBy','Taken By',['munshi','advocate','staff','others'],'munshi')+personFields()+durationField();
 }
 function setupCamListener(){
     const cam=document.getElementById('camInput');
@@ -1158,11 +1153,6 @@ function setupCamListener(){
     };
 }
 function capturedSrc(){const img=document.getElementById('capturedImg');return img&&!img.hidden?img.getAttribute('src'):null;}
-function toggleFields(){
-    const s=document.getElementById('assignedTo')||document.getElementById('takenBy');
-    const show=!!(s&&s.value);
-    ['nameField','mobileField'].forEach(id=>{const el=document.getElementById(id);if(el)el.hidden=!show;});
-}
 function chDur(d){
     const n=durIdx+d;
     if(n>=0&&n<DURATIONS.length){durIdx=n;const el=document.getElementById('durVal');if(el)el.textContent=DURATIONS[durIdx];}
@@ -1199,8 +1189,8 @@ function normalizePkMobile(t){
 //  receives the one contact the user picks — no access to the full list.
 // ============================================================
 const CONTACTS_OK=!!(navigator.contacts&&typeof navigator.contacts.select==='function');
-// Mobile input with a "Contacts" button attached; the button is always shown
-function mobileInput(inputHtml,nameId,mobileId){
+// Name input with a "Contacts" button inside it; picking fills name + mobile
+function withContact(inputHtml,nameId,mobileId){
     return`<div class="input-with-btn">${inputHtml}<button type="button" class="contact-btn" onclick="pickContact('${nameId}','${mobileId}')" aria-label="Choose from phone contacts">📇 Contacts</button></div>`;
 }
 async function pickContact(nameId,mobileId){
@@ -1238,8 +1228,7 @@ async function saveEntry(){
     const btn=document.getElementById('saveBtn');if(btn)btn.disabled=true;
     try{
         const k=dashKey();
-        if(k==='processing')await saveProcess();
-        else if(k==='task')await saveTask();
+        if(k==='task')await saveTask();
         else if(k==='material')await saveMat();
         else await saveFileMov();
     }finally{
@@ -1351,7 +1340,6 @@ function refreshDetail(){
 }
 function renderFileItem(file,type){
     const isRet=RETURNED_TYPES.includes(type),isOvr=OVERDUE_TYPES.includes(type);
-    if(file.mode==='process')return renderProcessItem(file,type,isRet,isOvr);
     const fid=file.id,name=file.name||'';
     const entryTitle=file.title&&file.title!=='Image Captured'?file.title:(file.taskType?label(file.taskType):'Entry');
     const useDateView=isDayOrDateDur(file.duration);
@@ -1391,12 +1379,15 @@ function renderFileItem(file,type){
     }
     info+=`<p><strong>Mobile:</strong> ${esc(file.mobile||'')}</p>`+takenLine+timer+done;
 
-    const warn=(!isRet&&isOvr)?`<div class="overdue-warning">⚠ Take action against ${esc(name)}</div>`:'';
+    const overdueMsg=file.mode==='assignedTask'
+        ?`Deadline has passed — please follow up with ${esc(name)}`
+        :`Return time is over — please ask ${esc(name)} to return the ${file.mode==='officeMaterial'?'material':'file'}`;
+    const warn=(!isRet&&isOvr)?`<div class="overdue-warning">⏰ ${overdueMsg}</div>`:'';
     const rl=file.mode==='assignedTask'?'Complete':'Receive';
-    const actions=`<button class="action-btn call-btn" onclick="makeCall(${jsArg(file.mobile||'')})">📞 Call</button>`+
+    const actions=(!isRet?moreBtn(fid,type):'')+
+        `<button class="action-btn call-btn" onclick="makeCall(${jsArg(file.mobile||'')})">📞 Call</button>`+
         (!isRet?`<button class="action-btn receive-btn" onclick="confirmReceive(${jsArg(fid)},${jsArg(type)},${jsArg(entryTitle)},${jsArg(name)})">✓ ${rl}</button>`
-               :`<button class="action-btn delete-btn" onclick="confirmDelete(${jsArg(fid)},${jsArg(type)},${jsArg(entryTitle)})">🗑 Delete</button>`)+
-        (!isRet?moreBtn(fid,type):'');
+               :`<button class="action-btn delete-btn" onclick="confirmDelete(${jsArg(fid)},${jsArg(type)},${jsArg(entryTitle)})">🗑 Delete</button>`);
     return`<article class="file-item" data-s="${esc(search)}">${banner}${head}<div class="file-content"><div class="file-info">${info}</div>${warn}<div class="file-actions">${actions}</div></div></article>`;
 }
 function showFileImg(type,id){const f=getArr(type).find(x=>x.id===id);if(f&&f.image)showImgPrev(f.image);}
@@ -1427,20 +1418,9 @@ function toLocalInput(iso){
 }
 // Field specs for the edit popup, per entry mode
 function editSpec(f){
-    const person=[{id:'name',label:'Name',req:1,max:60},{id:'mobile',label:'Mobile',type:'tel',req:1,max:13,contactName:'name'}];
+    const person=[{id:'name',label:'Name',req:1,max:60,contactMobile:'mobile'},{id:'mobile',label:'Mobile',type:'tel',req:1,max:13}];
     const due={id:'_due',type:'datetime-local',req:1,value:toLocalInput(f.expiresAt),
         label:f.mode==='assignedTask'?'Due Complete (Date & Time)':'Due Return (Date & Time)'};
-    if(f.mode==='process')return[
-        {id:'processType',label:'Process Type',type:'select',opts:PROCESS_TYPES,req:1},
-        {id:'caseTitle',label:'Case Title',req:1,max:150},
-        {id:'caseNo',label:'Case No.',max:40},
-        {id:'issuedTo',label:'Issued To (Name)',req:1,max:80},
-        {id:'partyRole',label:'Party Role',type:'select',opts:PARTY_ROLES,req:1},
-        {id:'address',label:'Address',type:'textarea',max:300},
-        {id:'serverName',label:'Process Server / Bailiff',max:60},
-        {id:'mobile',label:'Process Server Mobile',type:'tel',max:13,contactName:'serverName'},
-        {id:'issueDate',label:'Issue Date',type:'date',req:1},
-        {id:'dateField',label:'Next Hearing Date',type:'date',req:1}];
     if(f.mode==='assignedTask')return[
         {id:'taskType',label:'Task Type',type:'select',opts:['document','meeting','research','filing','others'],req:1},
         {id:'taskDetails',label:'Task Details',type:'textarea',req:1,max:1000},
@@ -1468,7 +1448,7 @@ function specHtml(spec,f){
             input=`<select id="${id}"><option value="">${x.req?'Select':'Select (optional)'}</option>${opts.map(o=>`<option value="${esc(o)}"${o===v?' selected':''}>${esc(label(o))}</option>`).join('')}</select>`;
         }else if(x.type==='textarea')input=`<textarea id="${id}" rows="3" maxlength="${x.max||500}">${esc(v)}</textarea>`;
         else input=`<input type="${x.type||'text'}" id="${id}" value="${esc(v)}"${x.max?` maxlength="${x.max}"`:''}${x.type==='tel'?' inputmode="numeric"':''}>`;
-        if(x.contactName)input=mobileInput(input,'ed_'+x.contactName,id);
+        if(x.contactMobile)input=withContact(input,id,'ed_'+x.contactMobile);
         return`<div class="field-group">${lbl}${input}</div>`;
     }).join('');
 }
@@ -1490,17 +1470,10 @@ async function saveEditedEntry(id,type){
         if(v.mobile&&!valMob(v.mobile))return fail('Mobile must be 11 digits starting with 03!');
     }
     const changes={...v};delete changes._due;
-    if(f.mode==='process'){
-        const hd=parseDate(v.dateField),idt=parseDate(v.issueDate);
-        if(!hd||!idt)return fail('Please enter valid dates!');
-        if(idt>hd)return fail('Issue date cannot be after the hearing date!');
-        changes.expiresAt=hd.toISOString();
-    }else{
-        if(f.mode==='fileMovement'&&!v.title&&!f.image)return fail('Please enter the case title!');
-        const due=new Date(v._due);
-        if(isNaN(due))return fail('Please enter a valid due date & time!');
-        if(due.getTime()!==new Date(f.expiresAt).getTime()){changes.expiresAt=due.toISOString();changes.duration='Custom';}
-    }
+    if(f.mode==='fileMovement'&&!v.title&&!f.image)return fail('Please enter the case title!');
+    const due=new Date(v._due);
+    if(isNaN(due))return fail('Please enter a valid due date & time!');
+    if(due.getTime()!==new Date(f.expiresAt).getTime()){changes.expiresAt=due.toISOString();changes.duration='Custom';}
     // Save, then put the entry in the right list (pending vs overdue) for its new due time
     const[pendingKey,overdueKey]=found.pair;
     const lists={[pendingKey]:getArr(pendingKey),[overdueKey]:getArr(overdueKey)};
@@ -1521,7 +1494,6 @@ async function saveEditedEntry(id,type){
 //  CONFIRM / RECEIVE / DELETE
 // ============================================================
 function confirmReceive(id,type,title,name){
-    if(type.startsWith('process')){showProcessReport(id,type,title);return;}
     const isTask=type.includes('Task');
     showConfirmPopup(`Confirm ${isTask?'Completion':'Return'}`,
         `Has "${title}" been ${isTask?'completed':'returned'} by ${name}?`,
@@ -2096,110 +2068,38 @@ function shareRecordCase(fi,ci){
 }
 
 // ============================================================
-//  PROCESSING
+//  INSTALL APP (PWA)
 // ============================================================
-// Summons / notices issued to parties & witnesses, tracked until the
-// service report comes back. Becomes "Report Due" on the hearing day.
-function processFields(){
-    const t=todayISO();
-    const opt=(id,lbl,ph,extra='')=>`<div class="input-field"><label for="${id}">${lbl}</label><input type="text" id="${id}" placeholder="${ph}" ${extra}></div>`;
-    return selectField('processType','Process Type',PROCESS_TYPES)+
-`<div class="input-field"><label for="caseTitle">Case Title <span class="required">*</span></label><input type="text" id="caseTitle" placeholder="e.g. Ahmad vs Bilal" maxlength="150"></div>`+
-        opt('caseNo','Case No.','Optional','maxlength="40"')+
-`<div class="input-field"><label for="issuedTo">Issued To (Name) <span class="required">*</span></label><input type="text" id="issuedTo" placeholder="Party / witness name" maxlength="80"></div>`+
-        selectField('partyRole','Party Role',PARTY_ROLES)+
-`<div class="input-field"><label for="address">Address</label><textarea id="address" placeholder="Optional" maxlength="300"></textarea></div>`+
-        opt('serverName','Process Server / Bailiff','Optional','maxlength="60"')+
-`<div class="input-field"><label for="mobile">Process Server Mobile</label>${mobileInput('<input type="tel" id="mobile" placeholder="03XXXXXXXXX (optional)" inputmode="numeric" maxlength="13">','serverName','mobile')}</div>`+
-`<div class="input-field"><label for="issueDate">Issue Date <span class="required">*</span></label><input type="date" id="issueDate" value="${t}" max="${t}"></div>
-<div class="input-field"><label for="dateField">Next Hearing Date <span class="required">*</span></label><input type="date" id="dateField" min="${t}"></div>`+
-        captureBox(true);
+let _installPrompt=null;
+// True when running as an installed app (home-screen PWA, fullscreen, or Play Store TWA)
+function isAppInstalled(){
+    return ['standalone','fullscreen','minimal-ui'].some(m=>window.matchMedia(`(display-mode: ${m})`).matches)
+        ||navigator.standalone===true||document.referrer.startsWith('android-app://');
 }
-async function saveProcess(){
-    const pt=gv('processType'),ct=gv('caseTitle'),to=gv('issuedTo'),role=gv('partyRole'),issue=gv('issueDate'),hearing=gv('dateField');
-    const mobile=normalizePkMobile(gv('mobile'));
-    if(!pt||!ct||!to||!role||!issue||!hearing)return fail('Please fill all required fields!');
-    if(mobile&&!valMob(mobile))return fail('Mobile must be 11 digits starting with 03!');
-    const hd=parseDate(hearing),idt=parseDate(issue);
-    if(!hd||!idt)return fail('Please enter valid dates!');
-    if(hd<parseDate(todayISO()))return fail('Hearing date cannot be in the past!');
-    if(idt>hd)return fail('Issue date cannot be after the hearing date!');
-    await persistEntry('processPending',{
-        id:Date.now(),mode:'process',processType:pt,caseTitle:ct,caseNo:gv('caseNo'),issuedTo:to,partyRole:role,
-        address:gv('address'),serverName:gv('serverName'),mobile,issueDate:issue,dateField:hearing,
-        expiresAt:hd.toISOString(),  // report is due by the start of the hearing day
-        image:capturedSrc(),createdAt:new Date().toISOString()
-    },`${label(pt)} entry saved`);
+function setupInstall(){
+    window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();_installPrompt=e;});
+    window.addEventListener('appinstalled',()=>{
+        _installPrompt=null;
+        const sec=document.getElementById('installSection');if(sec)sec.hidden=true;
+        toast('✓ App installed — open it from your home screen','success');
+    });
 }
-function renderProcessItem(file,type,isRet,isOvr){
-    const fid=file.id,title=`${label(file.processType)} — ${file.issuedTo||''}`;
-    const search=[file.caseTitle,file.caseNo,file.issuedTo,file.serverName,file.mobile,file.address,label(file.processType),label(file.reportResult)].filter(Boolean).join(' ').toLowerCase();
-    const served=SERVED_RESULTS.includes(file.reportResult);
-    let info=`<p><strong>Case:</strong> ${esc(file.caseTitle)}${file.caseNo?` <span class="muted">(No. ${esc(file.caseNo)})</span>`:''}</p>
-<p><strong>Issued To:</strong> ${esc(file.issuedTo)} <span class="muted">(${esc(label(file.partyRole))})</span></p>`;
-    if(file.address)info+=`<p><strong>Address:</strong> ${esc(file.address)}</p>`;
-    if(file.serverName||file.mobile)info+=`<p><strong>Process Server:</strong> ${esc(file.serverName||'—')}${file.mobile?` <span class="muted">(${esc(file.mobile)})</span>`:''}</p>`;
-    info+=`<p><strong>Issued:</strong> ${fmtDate(file.issueDate)}</p>`;
-    if(!isRet)info+=`<p data-exp="${esc(file.expiresAt)}"><strong>Time Remaining:</strong> ${timeLeft(file.expiresAt)}</p>`;
-    else{
-        const before=parseDate(file.reportDate)<parseDate(file.dateField);
-        info+=`<p><strong>Report:</strong> <span class="${served?'t-ok':'t-danger'}">${served?'✓':'✗'} ${esc(label(file.reportResult))}</span></p>
-<p><strong>Report Date:</strong> ${fmtDate(file.reportDate)} <span class="${before?'t-ok':'t-warn'}">${before?'(before hearing)':'(on/after hearing)'}</span></p>`;
-        if(file.reportRemarks)info+=`<p><strong>Remarks:</strong> ${esc(file.reportRemarks)}</p>`;
+async function installApp(){
+    closeSidebar();
+    if(isAppInstalled()){toast('App is already installed','success');return;}
+    if(_installPrompt){
+        _installPrompt.prompt();
+        try{const{outcome}=await _installPrompt.userChoice;if(outcome==='accepted')_installPrompt=null;}catch(e){}
+        return;
     }
-    if(file.reissueOf)info+=`<p class="muted">🔁 Re-issued process</p>`;
-    const banner=`<div class="file-banner">${esc(label(file.processType))}${file.caseNo?` · ${esc(file.caseNo)}`:''}</div>`;
-    const pic=file.image?`<button class="file-banner picture-banner" onclick="showFileImg(${jsArg(type)},${jsArg(fid)})">🖼 View Picture</button>`:'';
-    const head=`<div class="info-head">Hearing Date: ${fmtDate(file.dateField)}</div>`;
-    const warn=(!isRet&&isOvr)?`<div class="overdue-warning">⚠ Hearing date reached — service report not received</div>`:'';
-    let actions=file.mobile?`<button class="action-btn call-btn" onclick="makeCall(${jsArg(file.mobile)})">📞 Call</button>`:'';
-    if(!isRet)actions+=`<button class="action-btn receive-btn" onclick="confirmReceive(${jsArg(fid)},${jsArg(type)},${jsArg(title)},'')">📋 Add Report</button>`+moreBtn(fid,type);
-    else{
-        if(!served)actions+=`<button class="action-btn receive-btn" onclick="reissueProcess(${jsArg(fid)})">🔁 Re-issue</button>`;
-        actions+=`<button class="action-btn delete-btn" onclick="confirmDelete(${jsArg(fid)},${jsArg(type)},${jsArg(title)})">🗑 Delete</button>`;
-    }
-    return`<article class="file-item" data-s="${esc(search)}">${banner}${pic}${head}<div class="file-content"><div class="file-info">${info}</div>${warn}<div class="file-actions">${actions}</div></div></article>`;
-}
-function showProcessReport(id,type,title){
-    const t=todayISO();
-    showEntryPopup(`<h2 class="popup-title">Service Report</h2>
-<p class="popup-sub">${esc(title)}</p>
-<div class="field-group"><label for="repResult">Report Result <span class="required">*</span></label><select id="repResult"><option value="">Select</option>${REPORT_RESULTS.map(r=>`<option value="${r}">${label(r)}</option>`).join('')}</select></div>
-<div class="field-group"><label for="repDate">Report Date <span class="required">*</span></label><input type="date" id="repDate" value="${t}" max="${t}"></div>
-<div class="field-group"><label for="repRemarks">Remarks</label><textarea id="repRemarks" rows="3" maxlength="300" placeholder="Optional"></textarea></div>
-<div class="popup-actions"><button class="popup-cancel" onclick="closePopup()">Cancel</button><button class="popup-confirm" onclick="saveProcessReport(${jsArg(id)},${jsArg(type)})">Save Report</button></div>`);
-}
-async function saveProcessReport(id,type){
-    const result=gv('repResult'),date=gv('repDate');
-    if(!result||!date){toast('Please select report result and date!','error');return;}
-    if(parseDate(date)>parseDate(todayISO())){toast('Report date cannot be in the future!','error');return;}
-    const remarks=gv('repRemarks');
-    closePopup();
-    await doReceive(id,type,{reportResult:result,reportDate:date,reportRemarks:remarks},'✓ Service report saved');
-}
-function reissueProcess(id){
-    const old=getArr('processServed').find(f=>f.id===id);
-    if(!old)return;
-    const t=todayISO();
-    showEntryPopup(`<h2 class="popup-title">🔁 Re-issue ${esc(label(old.processType))}</h2>
-<p class="popup-sub">${esc(old.issuedTo)} — ${esc(old.caseTitle)}</p>
-<div class="field-group"><label for="riDate">New Hearing Date <span class="required">*</span></label><input type="date" id="riDate" min="${t}"></div>
-<div class="popup-actions"><button class="popup-cancel" onclick="closePopup()">Cancel</button><button class="popup-confirm" onclick="saveReissue(${jsArg(id)})">Re-issue</button></div>`,false);
-}
-async function saveReissue(id){
-    const old=getArr('processServed').find(f=>f.id===id);if(!old)return;
-    const riDate=gv('riDate'),hd=parseDate(riDate);
-    if(!hd){toast('Please select the new hearing date!','error');return;}
-    if(hd<parseDate(todayISO())){toast('Hearing date cannot be in the past!','error');return;}
-    closePopup();
-    const{reportResult,reportDate,reportRemarks,returnedAt,completedAt,returnedLate,...base}=old;
-    const entry={...base,id:Date.now(),issueDate:todayISO(),dateField:riDate,
-        expiresAt:hd.toISOString(),reissueOf:old.id,createdAt:new Date().toISOString()};
-    try{
-        const arr=getArr('processPending');arr.push(entry);
-        await setArr('processPending',arr);
-        toast('✓ Process re-issued','success');loadCounts();
-    }catch(e){toast('Save failed: '+e.message,'error');}
+    // No automatic prompt available (iPhone, already installed, or browser doesn't support it)
+    const ios=/iphone|ipad|ipod/i.test(navigator.userAgent);
+    showEntryPopup(`<h2 class="popup-title">📲 Install App</h2>
+<p class="popup-sub">Install Muhafiz on your home screen to open it like a normal app — full screen and it works offline.</p>
+<div class="kv">${ios
+    ?`<div class="kv-row"><span>1.</span><strong>Open this page in Safari</strong></div><div class="kv-row"><span>2.</span><strong>Tap Share ⬆️ at the bottom</strong></div><div class="kv-row"><span>3.</span><strong>Tap "Add to Home Screen"</strong></div>`
+    :`<div class="kv-row"><span>1.</span><strong>Open this page in Chrome</strong></div><div class="kv-row"><span>2.</span><strong>Tap the ⋮ menu (top right)</strong></div><div class="kv-row"><span>3.</span><strong>Tap "Install app" or "Add to Home screen"</strong></div>`}</div>
+<div class="popup-actions"><button class="popup-confirm" onclick="closePopup()">OK</button></div>`,false);
 }
 
 // ============================================================
