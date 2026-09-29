@@ -553,7 +553,8 @@
 // ============================================================
 const DB_NAME='MuhafizDB',DB_VER=1,STORE='appData';
 const DATA_KEYS=['filesOut','overdueFiles','returnedFiles','pendingTasks','overdueTasks','completedTasks',
-    'materialsOut','materialsOverdue','materialsReturned','englishFile_folders','bailBonds','record_folders'];
+    'materialsOut','materialsOverdue','materialsReturned','englishFile_folders','bailBonds','record_folders',
+    'processPending','processOverdue','processServed'];
 const DEFAULT_PIN='0000';  // used until the user sets their own PIN
 let _db=null;
 const _cache={};  // sync read cache populated at startup
@@ -682,16 +683,27 @@ const DUR_MINS={'5 Mins':5,'15 Mins':15,'30 Mins':30,'1 Hour':60,'2 Hours':120,'
 const LABELS={
     document:'Document Preparation',meeting:'Meeting',research:'Research',filing:'Filing',others:'Others',
     staff:'Staff',official:'Official',advocate:'Advocate',clerk_advocate:'Clerk Advocate',munshi:'Munshi',
-    civil:'Civil',criminal:'Criminal',execution:'Execution',miscellaneous:'Miscellaneous'
+    civil:'Civil',criminal:'Criminal',execution:'Execution',miscellaneous:'Miscellaneous',
+    // Processing (summons / notices)
+    summons:'Summons',notice:'Notice',bailable_warrant:'Bailable Warrant',non_bailable_warrant:'Non-Bailable Warrant',proclamation:'Proclamation',
+    plaintiff:'Plaintiff / Petitioner',defendant:'Defendant / Respondent',accused:'Accused',witness:'Witness',
+    served_personal:'Served (Personally)',served_affixation:'Served (Affixation)',refused:'Refused to Accept',
+    not_found:'Not Found / Address Incomplete',unexecuted:'Returned Unexecuted',other:'Other'
 };
+const PROCESS_TYPES=['summons','notice','bailable_warrant','non_bailable_warrant','proclamation','others'];
+const PARTY_ROLES=['plaintiff','defendant','accused','witness','others'];
+const REPORT_RESULTS=['served_personal','served_affixation','refused','not_found','unexecuted','other'];
+const SERVED_RESULTS=['served_personal','served_affixation'];
 const LIST_TITLES={filesOut:'Files Out',overdueFiles:'Overdue Files',returnedFiles:'Returned Files',
     pendingTasks:'Pending Tasks',overdueTasks:'Overdue Tasks',completedTasks:'Completed Tasks',
-    materialsOut:'Materials Out',materialsOverdue:'Overdue Materials',materialsReturned:'Returned Materials'};
-const RETURNED_TYPES=['returnedFiles','completedTasks','materialsReturned'];
-const OVERDUE_TYPES=['overdueFiles','overdueTasks','materialsOverdue'];
-const OVERDUE_PAIRS=[['filesOut','overdueFiles'],['pendingTasks','overdueTasks'],['materialsOut','materialsOverdue']];
+    materialsOut:'Materials Out',materialsOverdue:'Overdue Materials',materialsReturned:'Returned Materials',
+    processPending:'Pending Process',processOverdue:'Report Due',processServed:'Reported Process'};
+const RETURNED_TYPES=['returnedFiles','completedTasks','materialsReturned','processServed'];
+const OVERDUE_TYPES=['overdueFiles','overdueTasks','materialsOverdue','processOverdue'];
+const OVERDUE_PAIRS=[['filesOut','overdueFiles'],['pendingTasks','overdueTasks'],['materialsOut','materialsOverdue'],['processPending','processOverdue']];
 const RECEIVE_TARGET={filesOut:'returnedFiles',overdueFiles:'returnedFiles',pendingTasks:'completedTasks',
-    overdueTasks:'completedTasks',materialsOut:'materialsReturned',materialsOverdue:'materialsReturned'};
+    overdueTasks:'completedTasks',materialsOut:'materialsReturned',materialsOverdue:'materialsReturned',
+    processPending:'processServed',processOverdue:'processServed'};
 const MONTHS=['January','February','March','April','May','June','July','August','September','October','November','December'];
 const LP_DUR=550;
 let durIdx=3,curMode='fileMovement',curType='picture';
@@ -872,10 +884,11 @@ function selectMode(m,t){
 function dashKey(){
     if(curMode==='office')return curType==='assignedTask'?'task':'material';
     if(curMode==='myDocument')return'myDocument';
+    if(curMode==='processing')return'processing';
     return'fileMovement';
 }
 function updateMenuSel(){
-    const ids={fileMovement:curType==='title'?'menuFileTitle':'menuFilePicture',task:'menuAssignedTask',material:'menuMaterialMovement',myDocument:'menuMyDocument'};
+    const ids={fileMovement:curType==='title'?'menuFileTitle':'menuFilePicture',task:'menuAssignedTask',material:'menuMaterialMovement',myDocument:'menuMyDocument',processing:'menuProcessing'};
     document.querySelectorAll('.menu-item').forEach(i=>{i.classList.remove('active');i.removeAttribute('aria-current');});
     const el=document.getElementById(ids[dashKey()]);
     if(el){el.classList.add('active');el.setAttribute('aria-current','page');}
@@ -897,6 +910,10 @@ const DASH={
         ['materials-out',"openDetailView('materialsOut')",'Materials Out','materialsOut','📦'],
         ['materials-overdue',"openDetailView('materialsOverdue')",'Overdue Materials','materialsOverdue','⚠️'],
         ['materials-returned',"openDetailView('materialsReturned')",'Returned Materials','materialsReturned','✅']]},
+    processing:{title:'Processing (اجرائی)',btn:'New Process Entry',cards:[
+        ['pending',"openDetailView('processPending')",'Pending Process','processPending','📨'],
+        ['overdue',"openDetailView('processOverdue')",'Report Due','processOverdue','⏰'],
+        ['completed',"openDetailView('processServed')",'Reported','processServed','📋']]},
     myDocument:{title:'My Documents',btn:null,cards:[
         ['english-file','openEnglishFile()','English File','englishFile','📘'],
         ['bail-bonds','openBailBonds()','Bail Bonds','bailBonds','⚖️'],
@@ -951,7 +968,7 @@ function renderSidebar(){
     <div class="sb-section">
         <span class="sb-section-title">Documents</span>
         <button class="menu-item" id="menuMyDocument" onclick="selectMode('myDocument','view')">📁 My Documents</button>
-        <button class="menu-item" id="menuProcessing" onclick="openProcessing()">⚖️ Processing (اجرائی)</button>
+        <button class="menu-item" id="menuProcessing" onclick="selectMode('processing','summons')">⚖️ Processing (اجرائی)</button>
     </div>
     <div class="sb-section">
         <span class="sb-section-title">Security</span>
@@ -985,10 +1002,10 @@ function handleNewEntry(){
 }
 function renderForm(){
     const k=dashKey();
-    const isTask=k==='task',isMat=k==='material',isPic=k==='fileMovement'&&curType==='picture';
-    const title=isTask?'New Task':isMat?'New Material Entry':'New File Entry';
-    const sub=isTask?'Assigned Task':isMat?'Office Materials':(isPic?'File Movement · Picture':'File Movement · Title');
-    const fields=isTask?taskFields():isMat?matFields():isPic?picFields():titleFields();
+    const isTask=k==='task',isMat=k==='material',isProc=k==='processing',isPic=k==='fileMovement'&&curType==='picture';
+    const title=isProc?'New Process Entry':isTask?'New Task':isMat?'New Material Entry':'New File Entry';
+    const sub=isProc?'Processing · Summons / Notices':isTask?'Assigned Task':isMat?'Office Materials':(isPic?'File Movement · Picture':'File Movement · Title');
+    const fields=isProc?processFields():isTask?taskFields():isMat?matFields():isPic?picFields():titleFields();
     document.getElementById('formContainer').innerHTML=`<div class="wrap">
 <header class="header view-header"><button class="back-btn" onclick="goBack()" aria-label="Back">←</button><div class="header-content"><h1>${title}</h1><div class="date">${sub}</div></div></header>
 <div class="form-section">${fields}</div>
@@ -1090,7 +1107,8 @@ async function saveEntry(){
     const btn=document.getElementById('saveBtn');if(btn)btn.disabled=true;
     try{
         const k=dashKey();
-        if(k==='task')await saveTask();
+        if(k==='processing')await saveProcess();
+        else if(k==='task')await saveTask();
         else if(k==='material')await saveMat();
         else await saveFileMov(curType==='picture');
     }finally{
@@ -1202,6 +1220,7 @@ function refreshDetail(){
 }
 function renderFileItem(file,type){
     const isRet=RETURNED_TYPES.includes(type),isOvr=OVERDUE_TYPES.includes(type);
+    if(file.mode==='process')return renderProcessItem(file,type,isRet,isOvr);
     const fid=file.id,name=file.name||'';
     const entryTitle=file.title&&file.title!=='Image Captured'?file.title:(file.taskType?label(file.taskType):'Entry');
     const useDateView=isDayOrDateDur(file.duration);
@@ -1262,12 +1281,13 @@ function makeCall(m){if(m&&/^[0-9+]+$/.test(m))window.location.href='tel:'+m;}
 //  CONFIRM / RECEIVE / DELETE
 // ============================================================
 function confirmReceive(id,type,title,name){
+    if(type.startsWith('process')){showProcessReport(id,type,title);return;}
     const isTask=type.includes('Task');
     showConfirmPopup(`Confirm ${isTask?'Completion':'Return'}`,
         `Has "${title}" been ${isTask?'completed':'returned'} by ${name}?`,
         ()=>doReceive(id,type),false,{confirmText:isTask?'Mark Complete':'Mark Returned'});
 }
-async function doReceive(id,type){
+async function doReceive(id,type,extra={},msg=''){
     // Item may have moved from "out" to "overdue" while the list was open — search both
     const pair=OVERDUE_PAIRS.find(p=>p.includes(type)),target=RECEIVE_TARGET[type];
     if(!pair||!target)return;
@@ -1277,10 +1297,10 @@ async function doReceive(id,type){
         const[file]=arr.splice(idx,1);
         const now=new Date();
         const ret=getArr(target);
-        ret.push({...file,returnedAt:now.toISOString(),completedAt:now.toISOString(),returnedLate:now>new Date(file.expiresAt)});
+        ret.push({...file,returnedAt:now.toISOString(),completedAt:now.toISOString(),returnedLate:now>new Date(file.expiresAt),...extra});
         try{
             await Promise.all([setArr(key,arr),setArr(target,ret)]);
-            toast(type.includes('Task')?'✓ Task marked complete':'✓ Marked as returned','success');
+            toast(msg||(type.includes('Task')?'✓ Task marked complete':'✓ Marked as returned'),'success');
         }catch(e){toast('Save failed: '+e.message,'error');}
         refreshDetail();loadCounts();
         return;
@@ -1840,14 +1860,108 @@ function shareRecordCase(fi,ci){
 // ============================================================
 //  PROCESSING
 // ============================================================
-function openProcessing(){
-    closeSidebar();
-    showEntryPopup(`<div style="text-align:center;">
-        <div style="font-size:48px;margin-bottom:10px;">⚖️</div>
-        <h2 class="popup-title">Processing (اجرائی)</h2>
-        <p class="popup-sub" dir="auto">یہ فیچر جلد آنے والا ہے۔<br>Coming Soon!</p>
-        <div class="popup-actions"><button class="popup-confirm" onclick="closePopup()">OK</button></div>
-    </div>`,false);
+// Summons / notices issued to parties & witnesses, tracked until the
+// service report comes back. Becomes "Report Due" on the hearing day.
+function processFields(){
+    const t=todayISO();
+    const opt=(id,lbl,ph,extra='')=>`<div class="input-field"><label for="${id}">${lbl}</label><input type="text" id="${id}" placeholder="${ph}" ${extra}></div>`;
+    return selectField('processType','Process Type',PROCESS_TYPES)+
+`<div class="input-field"><label for="caseTitle">Case Title <span class="required">*</span></label><input type="text" id="caseTitle" placeholder="e.g. Ahmad vs Bilal" maxlength="150"></div>`+
+        opt('caseNo','Case No.','Optional','maxlength="40"')+
+`<div class="input-field"><label for="issuedTo">Issued To (Name) <span class="required">*</span></label><input type="text" id="issuedTo" placeholder="Party / witness name" maxlength="80"></div>`+
+        selectField('partyRole','Party Role',PARTY_ROLES)+
+`<div class="input-field"><label for="address">Address</label><textarea id="address" placeholder="Optional" maxlength="300"></textarea></div>`+
+        opt('serverName','Process Server / Bailiff','Optional','maxlength="60"')+
+        opt('mobile','Process Server Mobile','03XXXXXXXXX (optional)','inputmode="numeric" maxlength="13"').replace('type="text"','type="tel"')+
+`<div class="input-field"><label for="issueDate">Issue Date <span class="required">*</span></label><input type="date" id="issueDate" value="${t}" max="${t}"></div>
+<div class="input-field"><label for="dateField">Next Hearing Date <span class="required">*</span></label><input type="date" id="dateField" min="${t}"></div>`+
+        captureBox(true);
+}
+async function saveProcess(){
+    const pt=gv('processType'),ct=gv('caseTitle'),to=gv('issuedTo'),role=gv('partyRole'),issue=gv('issueDate'),hearing=gv('dateField');
+    const mobile=gv('mobile').replace(/[\s-]/g,'');
+    if(!pt||!ct||!to||!role||!issue||!hearing)return fail('Please fill all required fields!');
+    if(mobile&&!valMob(mobile))return fail('Mobile must be 11 digits starting with 03!');
+    const hd=parseDate(hearing),idt=parseDate(issue);
+    if(!hd||!idt)return fail('Please enter valid dates!');
+    if(hd<parseDate(todayISO()))return fail('Hearing date cannot be in the past!');
+    if(idt>hd)return fail('Issue date cannot be after the hearing date!');
+    await persistEntry('processPending',{
+        id:Date.now(),mode:'process',processType:pt,caseTitle:ct,caseNo:gv('caseNo'),issuedTo:to,partyRole:role,
+        address:gv('address'),serverName:gv('serverName'),mobile,issueDate:issue,dateField:hearing,
+        expiresAt:hd.toISOString(),  // report is due by the start of the hearing day
+        image:capturedSrc(),createdAt:new Date().toISOString()
+    },`${label(pt)} entry saved`);
+}
+function renderProcessItem(file,type,isRet,isOvr){
+    const fid=file.id,title=`${label(file.processType)} — ${file.issuedTo||''}`;
+    const search=[file.caseTitle,file.caseNo,file.issuedTo,file.serverName,file.mobile,file.address,label(file.processType),label(file.reportResult)].filter(Boolean).join(' ').toLowerCase();
+    const served=SERVED_RESULTS.includes(file.reportResult);
+    let info=`<p><strong>Case:</strong> ${esc(file.caseTitle)}${file.caseNo?` <span class="muted">(No. ${esc(file.caseNo)})</span>`:''}</p>
+<p><strong>Issued To:</strong> ${esc(file.issuedTo)} <span class="muted">(${esc(label(file.partyRole))})</span></p>`;
+    if(file.address)info+=`<p><strong>Address:</strong> ${esc(file.address)}</p>`;
+    if(file.serverName||file.mobile)info+=`<p><strong>Process Server:</strong> ${esc(file.serverName||'—')}${file.mobile?` <span class="muted">(${esc(file.mobile)})</span>`:''}</p>`;
+    info+=`<p><strong>Issued:</strong> ${fmtDate(file.issueDate)}</p>`;
+    if(!isRet)info+=`<p data-exp="${esc(file.expiresAt)}"><strong>Time Remaining:</strong> ${timeLeft(file.expiresAt)}</p>`;
+    else{
+        const before=parseDate(file.reportDate)<parseDate(file.dateField);
+        info+=`<p><strong>Report:</strong> <span class="${served?'t-ok':'t-danger'}">${served?'✓':'✗'} ${esc(label(file.reportResult))}</span></p>
+<p><strong>Report Date:</strong> ${fmtDate(file.reportDate)} <span class="${before?'t-ok':'t-warn'}">${before?'(before hearing)':'(on/after hearing)'}</span></p>`;
+        if(file.reportRemarks)info+=`<p><strong>Remarks:</strong> ${esc(file.reportRemarks)}</p>`;
+    }
+    if(file.reissueOf)info+=`<p class="muted">🔁 Re-issued process</p>`;
+    const banner=`<div class="file-banner">${esc(label(file.processType))}${file.caseNo?` · ${esc(file.caseNo)}`:''}</div>`;
+    const pic=file.image?`<button class="file-banner picture-banner" onclick="showFileImg(${jsArg(type)},${jsArg(fid)})">🖼 View Picture</button>`:'';
+    const head=`<div class="info-head">Hearing Date: ${fmtDate(file.dateField)}</div>`;
+    const warn=(!isRet&&isOvr)?`<div class="overdue-warning">⚠ Hearing date reached — service report not received</div>`:'';
+    let actions=file.mobile?`<button class="action-btn call-btn" onclick="makeCall(${jsArg(file.mobile)})">📞 Call</button>`:'';
+    if(!isRet)actions+=`<button class="action-btn receive-btn" onclick="confirmReceive(${jsArg(fid)},${jsArg(type)},${jsArg(title)},'')">📋 Add Report</button>`;
+    else{
+        if(!served)actions+=`<button class="action-btn receive-btn" onclick="reissueProcess(${jsArg(fid)})">🔁 Re-issue</button>`;
+        actions+=`<button class="action-btn delete-btn" onclick="confirmDelete(${jsArg(fid)},${jsArg(type)},${jsArg(title)})">🗑 Delete</button>`;
+    }
+    return`<article class="file-item" data-s="${esc(search)}">${banner}${pic}${head}<div class="file-content"><div class="file-info">${info}</div>${warn}<div class="file-actions">${actions}</div></div></article>`;
+}
+function showProcessReport(id,type,title){
+    const t=todayISO();
+    showEntryPopup(`<h2 class="popup-title">Service Report</h2>
+<p class="popup-sub">${esc(title)}</p>
+<div class="field-group"><label for="repResult">Report Result <span class="required">*</span></label><select id="repResult"><option value="">Select</option>${REPORT_RESULTS.map(r=>`<option value="${r}">${label(r)}</option>`).join('')}</select></div>
+<div class="field-group"><label for="repDate">Report Date <span class="required">*</span></label><input type="date" id="repDate" value="${t}" max="${t}"></div>
+<div class="field-group"><label for="repRemarks">Remarks</label><textarea id="repRemarks" rows="3" maxlength="300" placeholder="Optional"></textarea></div>
+<div class="popup-actions"><button class="popup-cancel" onclick="closePopup()">Cancel</button><button class="popup-confirm" onclick="saveProcessReport(${jsArg(id)},${jsArg(type)})">Save Report</button></div>`);
+}
+async function saveProcessReport(id,type){
+    const result=gv('repResult'),date=gv('repDate');
+    if(!result||!date){toast('Please select report result and date!','error');return;}
+    if(parseDate(date)>parseDate(todayISO())){toast('Report date cannot be in the future!','error');return;}
+    const remarks=gv('repRemarks');
+    closePopup();
+    await doReceive(id,type,{reportResult:result,reportDate:date,reportRemarks:remarks},'✓ Service report saved');
+}
+function reissueProcess(id){
+    const old=getArr('processServed').find(f=>f.id===id);
+    if(!old)return;
+    const t=todayISO();
+    showEntryPopup(`<h2 class="popup-title">🔁 Re-issue ${esc(label(old.processType))}</h2>
+<p class="popup-sub">${esc(old.issuedTo)} — ${esc(old.caseTitle)}</p>
+<div class="field-group"><label for="riDate">New Hearing Date <span class="required">*</span></label><input type="date" id="riDate" min="${t}"></div>
+<div class="popup-actions"><button class="popup-cancel" onclick="closePopup()">Cancel</button><button class="popup-confirm" onclick="saveReissue(${jsArg(id)})">Re-issue</button></div>`,false);
+}
+async function saveReissue(id){
+    const old=getArr('processServed').find(f=>f.id===id);if(!old)return;
+    const riDate=gv('riDate'),hd=parseDate(riDate);
+    if(!hd){toast('Please select the new hearing date!','error');return;}
+    if(hd<parseDate(todayISO())){toast('Hearing date cannot be in the past!','error');return;}
+    closePopup();
+    const{reportResult,reportDate,reportRemarks,returnedAt,completedAt,returnedLate,...base}=old;
+    const entry={...base,id:Date.now(),issueDate:todayISO(),dateField:riDate,
+        expiresAt:hd.toISOString(),reissueOf:old.id,createdAt:new Date().toISOString()};
+    try{
+        const arr=getArr('processPending');arr.push(entry);
+        await setArr('processPending',arr);
+        toast('✓ Process re-issued','success');loadCounts();
+    }catch(e){toast('Save failed: '+e.message,'error');}
 }
 
 // ============================================================
