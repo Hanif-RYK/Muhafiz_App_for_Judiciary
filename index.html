@@ -307,12 +307,17 @@
         .input-field:last-child{margin-bottom:0;}
         .input-field label,.field-group label{display:block;font-size:14px;font-weight:650;color:var(--text);margin-bottom:7px;}
         .required{color:var(--red);}
-        .label-row{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:7px;}
-        .label-row label{margin-bottom:0!important;}
+        .mode-chip{
+            display:inline-flex;align-items:center;gap:6px;margin:-4px 0 14px 2px;
+            padding:5px 12px;border-radius:999px;font-size:12.5px;font-weight:650;
+            background:var(--accent-soft);color:var(--accent-text);
+        }
+        .input-with-btn{display:flex;gap:8px;align-items:stretch;}
+        .input-with-btn input{flex:1;min-width:0;}
         .contact-btn{
-            flex-shrink:0;padding:6px 12px;border-radius:999px;cursor:pointer;
-            border:1px solid var(--border);background:var(--accent-soft);color:var(--accent-text);
-            font-size:12.5px;font-weight:700;transition:transform 0.12s;
+            flex-shrink:0;padding:0 14px;border-radius:var(--radius-sm);cursor:pointer;
+            border:1.5px solid var(--accent);background:var(--accent-soft);color:var(--accent-text);
+            font-size:14px;font-weight:700;white-space:nowrap;transition:transform 0.12s;
         }
         .contact-btn:active{transform:scale(0.95);}
         .input-field input,.input-field select,.input-field textarea,
@@ -926,7 +931,10 @@ function setupGlobalListeners(){
 // ============================================================
 //  SETTINGS / MODE
 // ============================================================
-function loadSettings(){curMode=cacheGet('currentMode')||'fileMovement';curType=cacheGet('currentEntryType')||'picture';}
+function loadSettings(){
+    curMode=cacheGet('currentMode')||'fileMovement';curType=cacheGet('currentEntryType')||'picture';
+    if(curMode==='fileMovement'&&curType!=='title')curType='picture';  // 'file' from the old merged form
+}
 function selectMode(m,t){
     closeSidebar();
     if(m===curMode&&t===curType)return;
@@ -941,7 +949,7 @@ function dashKey(){
     return'fileMovement';
 }
 function updateMenuSel(){
-    const ids={fileMovement:'menuFileEntry',task:'menuAssignedTask',material:'menuMaterialMovement',myDocument:'menuMyDocument',processing:'menuProcessing'};
+    const ids={fileMovement:curType==='title'?'menuFileTitle':'menuFilePicture',task:'menuAssignedTask',material:'menuMaterialMovement',myDocument:'menuMyDocument',processing:'menuProcessing'};
     document.querySelectorAll('.menu-item').forEach(i=>{i.classList.remove('active');i.removeAttribute('aria-current');});
     const el=document.getElementById(ids[dashKey()]);
     if(el){el.classList.add('active');el.setAttribute('aria-current','page');}
@@ -978,7 +986,7 @@ function renderDashboard(){
         `<button class="card ${cls}" onclick="${onclick}" data-count="${key}"><div class="card-content"><h2>${lbl}</h2><div class="count" id="count-${key}">0</div></div><div class="card-icon" aria-hidden="true">${icon}</div></button>`).join('');
     document.getElementById('mainDashboard').innerHTML=`<div class="wrap">
 <header class="header"><button class="menu-icon" onclick="openSidebar()" aria-label="Open menu"><span></span><span></span><span></span></button><div class="header-content"><h1>${cfg.title}</h1><div class="date" id="currentDate"></div></div><img class="header-logo" src="icon-192.png" alt="" width="36" height="36"></header>
-<div id="backupBanner"></div><div class="cards">${cards}</div>
+<div id="backupBanner"></div>${curMode==='fileMovement'?`<div class="mode-chip">${curType==='title'?'📝 Title Entry':'📷 Picture Entry'}</div>`:''}<div class="cards">${cards}</div>
 ${cfg.btn?`<button class="new-entry-btn" onclick="handleNewEntry()">＋ ${cfg.btn}</button>`:''}</div>`;
     updateDate();
 }
@@ -1009,7 +1017,8 @@ function renderSidebar(){
     </div>
     <div class="sb-section">
         <span class="sb-section-title">File Movement</span>
-        <button class="menu-item" id="menuFileEntry" onclick="selectMode('fileMovement','file')">📁 File Entry</button>
+        <button class="menu-item" id="menuFilePicture" onclick="selectMode('fileMovement','picture')">📷 Picture Entry</button>
+        <button class="menu-item" id="menuFileTitle" onclick="selectMode('fileMovement','title')">📝 Title Entry</button>
     </div>
     <div class="sb-section">
         <span class="sb-section-title">Office</span>
@@ -1086,8 +1095,8 @@ function renderForm(){
     const k=dashKey();
     const isTask=k==='task',isMat=k==='material',isProc=k==='processing';
     const title=isProc?'New Process Entry':isTask?'New Task':isMat?'New Material Entry':'New File Entry';
-    const sub=isProc?'Processing · Summons / Notices':isTask?'Assigned Task':isMat?'Office Materials':'File Movement';
-    const fields=isProc?processFields():isTask?taskFields():isMat?matFields():fileFields();
+    const sub=isProc?'Processing · Summons / Notices':isTask?'Assigned Task':isMat?'Office Materials':(curType==='title'?'File Movement · Title':'File Movement · Picture');
+    const fields=isProc?processFields():isTask?taskFields():isMat?matFields():curType==='title'?titleFields():picFields();
     document.getElementById('formContainer').innerHTML=`<div class="wrap">
 <header class="header view-header"><button class="back-btn" onclick="goBack()" aria-label="Back">←</button><div class="header-content"><h1>${title}</h1><div class="date">${sub}</div></div></header>
 <div class="form-section">${fields}</div>
@@ -1098,8 +1107,8 @@ function selectField(id,lbl,opts,onchange=''){
     return`<div class="input-field"><label for="${id}">${lbl} <span class="required">*</span></label><select id="${id}"${onchange?` onchange="${onchange}"`:''}><option value="">Select</option>${opts.map(o=>`<option value="${o}">${label(o)}</option>`).join('')}</select></div>`;
 }
 function personFields(){
-    return`<div class="input-field" id="nameField" hidden><div class="label-row"><label for="name">Name <span class="required">*</span></label>${contactBtn('name','mobile')}</div><input type="text" id="name" autocomplete="name" maxlength="60"></div>
-<div class="input-field" id="mobileField" hidden><label for="mobile">Mobile <span class="required">*</span></label><input type="tel" id="mobile" placeholder="03XXXXXXXXX" inputmode="numeric" maxlength="13" autocomplete="tel"></div>`;
+    return`<div class="input-field" id="nameField" hidden><label for="name">Name <span class="required">*</span></label><input type="text" id="name" autocomplete="name" maxlength="60"></div>
+<div class="input-field" id="mobileField" hidden><label for="mobile">Mobile <span class="required">*</span></label>${mobileInput('<input type="tel" id="mobile" placeholder="03XXXXXXXXX" inputmode="numeric" maxlength="13" autocomplete="tel">','name','mobile')}</div>`;
 }
 function durationField(){
     const isCustom=DURATIONS[durIdx]==='Enter Date';
@@ -1119,10 +1128,12 @@ function matFields(){
     return captureBox(true)+`<div class="input-field"><label for="materialDetails">Material Details</label><textarea id="materialDetails" placeholder="Enter material details" maxlength="1000"></textarea></div>`+
         selectField('takenBy','Taken By',['staff','official','advocate','clerk_advocate','others'],'toggleFields()')+personFields()+durationField();
 }
-// One form for all file entries: picture and/or case title (at least one is required)
-function fileFields(){
-    return captureBox(true)+`<div class="input-field"><label for="title">Case Title</label><input type="text" id="title" placeholder="Case title (required if no picture)" maxlength="150"></div>
-<div class="input-field"><label for="nature">Case Nature</label><select id="nature"><option value="">Select (optional)</option>${NATURES.map(o=>`<option value="${o}">${label(o)}</option>`).join('')}</select></div>`+hearingField()+
+function picFields(){
+    return captureBox(false)+hearingField()+selectField('takenBy','Taken By',['advocate','munshi','staff','others'],'toggleFields()')+personFields()+durationField();
+}
+function titleFields(){
+    return`<div class="input-field"><label for="title">Case Title <span class="required">*</span></label><input type="text" id="title" placeholder="Enter case title" maxlength="150"></div>`+
+        selectField('nature','Case Nature',NATURES)+hearingField()+
         selectField('takenBy','Taken By',['advocate','munshi','staff','others'],'toggleFields()')+personFields()+durationField();
 }
 function setupCamListener(){
@@ -1185,11 +1196,17 @@ function normalizePkMobile(t){
 //  CONTACT PICKER (Android Chrome / installed app). The app only
 //  receives the one contact the user picks — no access to the full list.
 // ============================================================
-const CONTACTS_OK='contacts' in navigator&&'ContactsManager' in window;
-function contactBtn(nameId,mobileId){
-    return CONTACTS_OK?`<button type="button" class="contact-btn" onclick="pickContact('${nameId}','${mobileId}')">📇 Contacts</button>`:'';
+const CONTACTS_OK=!!(navigator.contacts&&typeof navigator.contacts.select==='function');
+// Mobile input with a "Contacts" button attached; the button is always shown
+function mobileInput(inputHtml,nameId,mobileId){
+    return`<div class="input-with-btn">${inputHtml}<button type="button" class="contact-btn" onclick="pickContact('${nameId}','${mobileId}')" aria-label="Choose from phone contacts">📇 Contacts</button></div>`;
 }
 async function pickContact(nameId,mobileId){
+    if(!CONTACTS_OK){
+        toast('Contact list is not supported on this phone/browser — please type the number (works on Android Chrome)','error');
+        const m=document.getElementById(mobileId);if(m)m.focus();
+        return;
+    }
     let c;
     try{[c]=await navigator.contacts.select(['name','tel'],{multiple:false});}
     catch(e){if(e.name!=='AbortError')toast('Could not open contacts: '+e.message,'error');return;}
@@ -1259,8 +1276,9 @@ async function saveMat(){
     await persistEntry('materialsOut',{...baseEntry(expAt,p,'officeMaterial'),image,materialDetails:md,takenBy:tb},'Material entry saved');
 }
 async function saveFileMov(){
-    const image=capturedSrc(),title=gv('title'),nature=gv('nature');
-    if(!image&&!title)return fail('Please capture a picture or enter the case title!');
+    let title,nature,image=null;
+    if(curType==='title'){title=gv('title');nature=gv('nature');if(!title||!nature)return fail('Please fill all required fields!');}
+    else{image=capturedSrc();if(!image)return fail('Please capture an image!');title='Image Captured';nature='N/A';}
     const df=gv('dateField'),tb=gv('takenBy');
     if(!df||!tb)return fail('Please fill all required fields!');
     const p=personValues();if(!p)return;
@@ -1415,7 +1433,7 @@ function toLocalInput(iso){
 }
 // Field specs for the edit popup, per entry mode
 function editSpec(f){
-    const person=[{id:'name',label:'Name',req:1,max:60,contact:'mobile'},{id:'mobile',label:'Mobile',type:'tel',req:1,max:13}];
+    const person=[{id:'name',label:'Name',req:1,max:60},{id:'mobile',label:'Mobile',type:'tel',req:1,max:13,contactName:'name'}];
     const due={id:'_due',type:'datetime-local',req:1,value:toLocalInput(f.expiresAt),
         label:f.mode==='assignedTask'?'Due Complete (Date & Time)':'Due Return (Date & Time)'};
     if(f.mode==='process')return[
@@ -1425,8 +1443,8 @@ function editSpec(f){
         {id:'issuedTo',label:'Issued To (Name)',req:1,max:80},
         {id:'partyRole',label:'Party Role',type:'select',opts:PARTY_ROLES,req:1},
         {id:'address',label:'Address',type:'textarea',max:300},
-        {id:'serverName',label:'Process Server / Bailiff',max:60,contact:'mobile'},
-        {id:'mobile',label:'Process Server Mobile',type:'tel',max:13},
+        {id:'serverName',label:'Process Server / Bailiff',max:60},
+        {id:'mobile',label:'Process Server Mobile',type:'tel',max:13,contactName:'serverName'},
         {id:'issueDate',label:'Issue Date',type:'date',req:1},
         {id:'dateField',label:'Next Hearing Date',type:'date',req:1}];
     if(f.mode==='assignedTask')return[
@@ -1449,14 +1467,14 @@ function specHtml(spec,f){
     return spec.map(x=>{
         const v=x.value!==undefined?x.value:(f[x.id]||'');
         const id='ed_'+x.id,star=x.req?' <span class="required">*</span>':'';
-        let lbl=`<label for="${id}">${x.label}${star}</label>`;
-        if(x.contact){const b=contactBtn(id,'ed_'+x.contact);if(b)lbl=`<div class="label-row">${lbl}${b}</div>`;}
+        const lbl=`<label for="${id}">${x.label}${star}</label>`;
         let input;
         if(x.type==='select'){
             const opts=x.opts.includes(v)||!v?x.opts:[...x.opts,v];  // keep legacy values selectable
             input=`<select id="${id}"><option value="">${x.req?'Select':'Select (optional)'}</option>${opts.map(o=>`<option value="${esc(o)}"${o===v?' selected':''}>${esc(label(o))}</option>`).join('')}</select>`;
         }else if(x.type==='textarea')input=`<textarea id="${id}" rows="3" maxlength="${x.max||500}">${esc(v)}</textarea>`;
         else input=`<input type="${x.type||'text'}" id="${id}" value="${esc(v)}"${x.max?` maxlength="${x.max}"`:''}${x.type==='tel'?' inputmode="numeric"':''}>`;
+        if(x.contactName)input=mobileInput(input,'ed_'+x.contactName,id);
         return`<div class="field-group">${lbl}${input}</div>`;
     }).join('');
 }
@@ -2109,8 +2127,8 @@ function processFields(){
 `<div class="input-field"><label for="issuedTo">Issued To (Name) <span class="required">*</span></label><input type="text" id="issuedTo" placeholder="Party / witness name" maxlength="80"></div>`+
         selectField('partyRole','Party Role',PARTY_ROLES)+
 `<div class="input-field"><label for="address">Address</label><textarea id="address" placeholder="Optional" maxlength="300"></textarea></div>`+
-        opt('serverName','Process Server / Bailiff','Optional','maxlength="60"').replace('<label for="serverName">Process Server / Bailiff</label>',`<div class="label-row"><label for="serverName">Process Server / Bailiff</label>${contactBtn('serverName','mobile')}</div>`)+
-        opt('mobile','Process Server Mobile','03XXXXXXXXX (optional)','inputmode="numeric" maxlength="13"').replace('type="text"','type="tel"')+
+        opt('serverName','Process Server / Bailiff','Optional','maxlength="60"')+
+`<div class="input-field"><label for="mobile">Process Server Mobile</label>${mobileInput('<input type="tel" id="mobile" placeholder="03XXXXXXXXX (optional)" inputmode="numeric" maxlength="13">','serverName','mobile')}</div>`+
 `<div class="input-field"><label for="issueDate">Issue Date <span class="required">*</span></label><input type="date" id="issueDate" value="${t}" max="${t}"></div>
 <div class="input-field"><label for="dateField">Next Hearing Date <span class="required">*</span></label><input type="date" id="dateField" min="${t}"></div>`+
         captureBox(true);
