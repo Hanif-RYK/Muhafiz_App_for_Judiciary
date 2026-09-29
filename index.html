@@ -312,14 +312,16 @@
             padding:5px 12px;border-radius:999px;font-size:12.5px;font-weight:650;
             background:var(--accent-soft);color:var(--accent-text);
         }
-        .input-with-btn{display:flex;gap:8px;align-items:stretch;}
-        .input-with-btn input{flex:1;min-width:0;}
+        /* Contacts button sits INSIDE the mobile input, on the right edge */
+        .input-with-btn{position:relative;}
+        .input-with-btn input{padding-right:118px!important;}
         .contact-btn{
-            flex-shrink:0;padding:0 14px;border-radius:var(--radius-sm);cursor:pointer;
-            border:1.5px solid var(--accent);background:var(--accent-soft);color:var(--accent-text);
-            font-size:14px;font-weight:700;white-space:nowrap;transition:transform 0.12s;
+            position:absolute;top:50%;right:6px;transform:translateY(-50%);
+            padding:8px 12px;border-radius:9px;cursor:pointer;
+            border:none;background:var(--accent-soft);color:var(--accent-text);
+            font-size:13.5px;font-weight:700;white-space:nowrap;transition:filter 0.12s;
         }
-        .contact-btn:active{transform:scale(0.95);}
+        .contact-btn:active{filter:brightness(0.9);}
         .input-field input,.input-field select,.input-field textarea,
         .field-group input,.field-group select,.field-group textarea{
             width:100%;padding:13px 14px;font-size:16px;
