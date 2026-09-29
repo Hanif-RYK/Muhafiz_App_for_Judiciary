@@ -1410,24 +1410,16 @@ function closeImageModal(){document.getElementById('imageModal').classList.remov
 function makeCall(m){if(m&&/^[0-9+]+$/.test(m))window.location.href='tel:'+m;}
 
 // ============================================================
-//  EDIT / DELETE PENDING ENTRIES
+//  EDIT PENDING ENTRIES
 // ============================================================
-function moreBtn(id,type){return`<button class="action-btn more-btn" onclick="entryOptions(${jsArg(id)},${jsArg(type)})" aria-label="More options">⋯</button>`;}
+// Pending / overdue entries can only be edited — never deleted — so a file that is
+// still out can't disappear from the record. Delete exists only on returned lists.
+function moreBtn(id,type){return`<button class="action-btn more-btn" onclick="editEntry(${jsArg(id)},${jsArg(type)})" aria-label="Edit entry">✏️</button>`;}
 // Locate an entry in its pending/overdue pair (it may have moved while the list was open)
 function findPending(id,type){
     const pair=OVERDUE_PAIRS.find(p=>p.includes(type));if(!pair)return null;
     for(const key of pair){const item=getArr(key).find(f=>f.id===id);if(item)return{pair,key,item};}
     return null;
-}
-function entryOptions(id,type){
-    const found=findPending(id,type);
-    if(!found){toast('Entry not found','error');refreshDetail();return;}
-    showEntryPopup(`<h2 class="popup-title">Entry Options</h2>
-<div class="popup-actions stack">
-    <button class="popup-confirm" onclick="closePopup();editEntry(${jsArg(id)},${jsArg(type)})">✏️ Edit Entry</button>
-    <button class="popup-confirm danger" onclick="closePopup();deletePendingEntry(${jsArg(id)},${jsArg(type)})">🗑 Delete Entry</button>
-    <button class="popup-cancel" onclick="closePopup()">Cancel</button>
-</div>`,false);
 }
 function toLocalInput(iso){
     const d=new Date(iso);if(isNaN(d))return'';
@@ -1523,18 +1515,6 @@ async function saveEditedEntry(id,type){
         toast(dst!==found.key?(dst===pendingKey?'✓ Updated — moved back to pending':'✓ Updated — now overdue'):'✓ Entry updated','success');
     }catch(e){toast('Save failed: '+e.message,'error');}
     refreshDetail();loadCounts();
-}
-function deletePendingEntry(id,type){
-    const found=findPending(id,type);
-    if(!found){toast('Entry not found','error');refreshDetail();return;}
-    const f=found.item;
-    const name=f.mode==='process'?`${label(f.processType)} — ${f.issuedTo}`:(f.title&&f.title!=='Image Captured'?f.title:f.taskType?label(f.taskType):f.name||'this entry');
-    confirmWithPin('Delete Entry',`Delete "${name}"? This cannot be undone. Enter your PIN to confirm.`,async()=>{
-        const cur=findPending(id,type);if(!cur)return;
-        try{await setArr(cur.key,getArr(cur.key).filter(x=>x.id!==id));toast('Entry deleted','success');}
-        catch(e){toast('Delete failed: '+e.message,'error');}
-        refreshDetail();loadCounts();
-    });
 }
 
 // ============================================================
