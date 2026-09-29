@@ -1105,12 +1105,12 @@ function renderForm(){
 <div class="form-actions"><button class="cancel-btn" onclick="goBack()">Cancel</button><button class="save-btn" id="saveBtn" onclick="saveEntry()">Save Entry 💾</button></div></div>`;
     setupCamListener();
 }
-function selectField(id,lbl,opts,onchange=''){
-    return`<div class="input-field"><label for="${id}">${lbl} <span class="required">*</span></label><select id="${id}"${onchange?` onchange="${onchange}"`:''}><option value="">Select</option>${opts.map(o=>`<option value="${o}">${label(o)}</option>`).join('')}</select></div>`;
+function selectField(id,lbl,opts,selected=''){
+    return`<div class="input-field"><label for="${id}">${lbl} <span class="required">*</span></label><select id="${id}"><option value="">Select</option>${opts.map(o=>`<option value="${o}"${o===selected?' selected':''}>${label(o)}</option>`).join('')}</select></div>`;
 }
 function personFields(){
-    return`<div class="input-field" id="nameField" hidden><label for="name">Name <span class="required">*</span></label>${withContact('<input type="text" id="name" autocomplete="name" maxlength="60" placeholder="Type or pick a contact">','name','mobile')}</div>
-<div class="input-field" id="mobileField" hidden><label for="mobile">Mobile <span class="required">*</span></label><input type="tel" id="mobile" placeholder="03XXXXXXXXX" inputmode="numeric" maxlength="13" autocomplete="tel"></div>`;
+    return`<div class="input-field" id="nameField"><label for="name">Name <span class="required">*</span></label>${withContact('<input type="text" id="name" autocomplete="name" maxlength="60" placeholder="Type or pick a contact">','name','mobile')}</div>
+<div class="input-field" id="mobileField"><label for="mobile">Mobile <span class="required">*</span></label><input type="tel" id="mobile" placeholder="03XXXXXXXXX" inputmode="numeric" maxlength="13" autocomplete="tel"></div>`;
 }
 function durationField(){
     const isCustom=DURATIONS[durIdx]==='Enter Date';
@@ -1124,19 +1124,19 @@ const hearingField=()=>`<div class="input-field"><label for="dateField">Hearing 
 function taskFields(){
     return selectField('taskType','Task Type',['document','meeting','research','filing','others'])+
 `<div class="input-field"><label for="taskDetails">Task Details <span class="required">*</span></label><textarea id="taskDetails" placeholder="Enter task details" maxlength="1000"></textarea></div>`+
-        selectField('assignedTo','Assigned To',['staff','official','advocate','clerk_advocate','others'],'toggleFields()')+personFields()+durationField();
+        selectField('assignedTo','Assigned To',['staff','official','advocate','clerk_advocate','others'])+personFields()+durationField();
 }
 function matFields(){
     return captureBox(true)+`<div class="input-field"><label for="materialDetails">Material Details</label><textarea id="materialDetails" placeholder="Enter material details" maxlength="1000"></textarea></div>`+
-        selectField('takenBy','Taken By',['staff','official','advocate','clerk_advocate','others'],'toggleFields()')+personFields()+durationField();
+        selectField('takenBy','Taken By',['staff','official','advocate','clerk_advocate','others'])+personFields()+durationField();
 }
 function picFields(){
-    return captureBox(false)+hearingField()+selectField('takenBy','Taken By',['advocate','munshi','staff','others'],'toggleFields()')+personFields()+durationField();
+    return captureBox(false)+hearingField()+selectField('takenBy','Taken By',['munshi','advocate','staff','others'],'munshi')+personFields()+durationField();
 }
 function titleFields(){
     return`<div class="input-field"><label for="title">Case Title <span class="required">*</span></label><input type="text" id="title" placeholder="Enter case title" maxlength="150"></div>`+
         selectField('nature','Case Nature',NATURES)+hearingField()+
-        selectField('takenBy','Taken By',['advocate','munshi','staff','others'],'toggleFields()')+personFields()+durationField();
+        selectField('takenBy','Taken By',['munshi','advocate','staff','others'],'munshi')+personFields()+durationField();
 }
 function setupCamListener(){
     const cam=document.getElementById('camInput');
@@ -1158,11 +1158,6 @@ function setupCamListener(){
     };
 }
 function capturedSrc(){const img=document.getElementById('capturedImg');return img&&!img.hidden?img.getAttribute('src'):null;}
-function toggleFields(){
-    const s=document.getElementById('assignedTo')||document.getElementById('takenBy');
-    const show=!!(s&&s.value);
-    ['nameField','mobileField'].forEach(id=>{const el=document.getElementById(id);if(el)el.hidden=!show;});
-}
 function chDur(d){
     const n=durIdx+d;
     if(n>=0&&n<DURATIONS.length){durIdx=n;const el=document.getElementById('durVal');if(el)el.textContent=DURATIONS[durIdx];}
