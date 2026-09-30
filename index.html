@@ -450,7 +450,6 @@
         }
 
         /* ── DETAIL CONTENT ── */
-        .view-meta{color:var(--text-2);font-size:13px;margin:0 4px 12px;}
         .kv{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:4px 16px;margin-bottom:14px;box-shadow:var(--shadow-sm);}
         .kv-row{display:flex;justify-content:space-between;gap:16px;padding:11px 0;border-bottom:1px solid var(--border);font-size:14px;}
         .kv-row:last-child{border-bottom:none;}
@@ -655,6 +654,16 @@ async function dbSet(key,value){
         tx.onerror=()=>rej(tx.error);
         tx.onabort=()=>rej(tx.error||new Error('Storage transaction aborted'));
     });
+}
+// Older English File documents stored their first image twice ("data" + images[0]).
+// Drop the duplicate once to save space; documents with only "data" are left as they are.
+function removeDuplicateDocImages(){
+    const folders=getArr('englishFile_folders');
+    let changed=false;
+    folders.forEach(f=>(f.documents||[]).forEach(d=>{
+        if(Array.isArray(d.images)&&d.images.length&&'data' in d){delete d.data;changed=true;}
+    }));
+    if(changed)setArr('englishFile_folders',folders).catch(console.error);
 }
 function dbDelete(key){
     delete _cache[key];
@@ -929,6 +938,7 @@ document.addEventListener('DOMContentLoaded',async()=>{
         setupGlobalListeners();
         requestPersistentStorage();
         OBSOLETE_KEYS.forEach(k=>{if(k in _cache)dbDelete(k).catch(console.error);});
+        removeDuplicateDocImages();
         setupInstall();
     }catch(e){
         console.error(e);
@@ -1550,7 +1560,7 @@ async function doReceive(id,type,extra={},msg=''){
         const[file]=arr.splice(idx,1);
         const now=new Date();
         const ret=getArr(target);
-        ret.push({...file,returnedAt:now.toISOString(),completedAt:now.toISOString(),returnedLate:now>new Date(file.expiresAt),...extra});
+        ret.push({...file,returnedAt:now.toISOString(),completedAt:now.toISOString(),...extra});
         try{
             await Promise.all([setArr(key,arr),setArr(target,ret)]);
             await animateOut(cardEl(`.file-item[data-id="${CSS.escape(String(id))}"]`));
@@ -1818,7 +1828,7 @@ async function engDocSaveAll(fi){
         setLoadingText('Saving document...');
         const folders=engFolders();
         if(!folders[fi])throw new Error('Folder not found');
-        (folders[fi].documents=folders[fi].documents||[]).push({name:title,images,data:images[0],createdAt:new Date().toISOString()});
+        (folders[fi].documents=folders[fi].documents||[]).push({name:title,images,createdAt:new Date().toISOString()});
         await setArr('englishFile_folders',folders);
         openEnglishFolder(fi,true);loadCounts();toast('✓ Document saved','success');
     }catch(e){toast(e.message.startsWith('No valid')?e.message:'Save failed: '+e.message,'error');}
