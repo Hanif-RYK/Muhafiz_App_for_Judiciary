@@ -126,11 +126,11 @@
         /* ── RESET & BASE ── */
         *,*::before,*::after{margin:0;padding:0;box-sizing:border-box;}
         html{-webkit-text-size-adjust:100%;}
+        /* Fixed gradient layer (cheaper than background-attachment:fixed, which repaints on every scroll) */
+        body::before{content:'';position:fixed;inset:0;z-index:-1;background:var(--bg-gradient);pointer-events:none;}
         body{
             font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
             background-color:var(--bg);
-            background-image:var(--bg-gradient);
-            background-attachment:fixed;
             min-height:100vh;min-height:100dvh;
             color:var(--text);line-height:1.4;
             -webkit-tap-highlight-color:transparent;
@@ -195,8 +195,13 @@
         .card-content h2{font-size:12.5px;color:var(--text-2);font-weight:650;margin-bottom:6px;text-transform:uppercase;letter-spacing:0.5px;}
         .card-content .count{font-size:36px;font-weight:800;line-height:1;color:var(--c);font-variant-numeric:tabular-nums;}
         .card-icon{width:52px;height:52px;border-radius:14px;display:grid;place-items:center;font-size:24px;background:var(--c-soft);flex-shrink:0;}
-        .card.has-alert .card-icon{animation:alertPulse 2s ease-in-out infinite;}
-        @keyframes alertPulse{0%,100%{box-shadow:0 0 0 0 var(--red-soft);}50%{box-shadow:0 0 0 7px var(--red-soft);}}
+        /* Pulse animates only opacity (GPU) instead of box-shadow (repaints every frame) */
+        .card-icon{position:relative;isolation:isolate;}
+        .card.has-alert .card-icon::after{
+            content:'';position:absolute;inset:-7px;border-radius:18px;background:var(--red-soft);
+            z-index:-1;opacity:0;animation:alertPulse 2s ease-in-out infinite;will-change:opacity;
+        }
+        @keyframes alertPulse{0%,100%{opacity:0;}50%{opacity:1;}}
         .files-out,.english-file{--c:var(--blue);--c-soft:var(--blue-soft);}
         .overdue,.materials-overdue{--c:var(--red);--c-soft:var(--red-soft);}
         .returned{--c:var(--green);--c-soft:var(--green-soft);}
@@ -282,7 +287,7 @@
         /* ── FULL-SCREEN VIEWS ── */
         .form-container,.detail-view{
             position:fixed;inset:0;
-            background-color:var(--bg);background-image:var(--bg-gradient);background-attachment:fixed;
+            background-color:var(--bg);background-image:var(--bg-gradient);
             overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;
             padding:calc(14px + var(--safe-t)) 14px calc(28px + var(--safe-b));
             opacity:0;pointer-events:none;visibility:hidden;
@@ -377,6 +382,11 @@
         .search-input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-glow);}
 
         /* ── FILE ITEMS (list entries) ── */
+        .removing{
+            opacity:0;transform:scale(0.97);height:0!important;
+            margin-top:0!important;margin-bottom:0!important;padding-top:0!important;padding-bottom:0!important;border-width:0!important;
+            transition:opacity 0.2s ease,transform 0.2s ease,height 0.25s var(--ease),margin 0.25s var(--ease),padding 0.25s var(--ease);
+        }
         .file-item{
             background:var(--surface);border:1px solid var(--border);
             border-radius:16px;margin-bottom:12px;box-shadow:var(--shadow);overflow:hidden;
@@ -667,11 +677,24 @@ async function dbLoadAll(){
     }
 }
 function cacheGet(key){return key in _cache?_cache[key]:null;}
+// Parsed arrays are cached (keyed by the raw JSON string they came from) so reading
+// data — timers, counts, lists — never re-parses large image data. getArr returns a
+// shallow copy, so callers can push/splice/sort freely before saving with setArr.
+const _parsed={};
 function getArr(key){
-    try{const v=JSON.parse(cacheGet(key)||'[]');return Array.isArray(v)?v:[];}
-    catch(e){console.error('Corrupt data for',key,e);return [];}
+    const raw=cacheGet(key)||'[]',hit=_parsed[key];
+    if(hit&&hit.raw===raw)return hit.val.slice();
+    let val;
+    try{val=JSON.parse(raw);if(!Array.isArray(val))val=[];}
+    catch(e){console.error('Corrupt data for',key,e);val=[];}
+    _parsed[key]={raw,val};
+    return val.slice();
 }
-function setArr(key,arr){return dbSet(key,JSON.stringify(arr));}
+function setArr(key,arr){
+    const raw=JSON.stringify(arr);
+    _parsed[key]={raw,val:arr.slice()};
+    return dbSet(key,raw);
+}
 
 // ============================================================
 //  IMAGE HELPERS
@@ -879,6 +902,10 @@ function showDashboard(){
 function renderDetail(html,{listType=null,keepScroll=false}={}){
     const dv=document.getElementById('detailView');
     const top=dv.scrollTop;
+    // Same screen re-rendered after an edit/delete → stay where the user was
+    const screen=navStack.length+':'+JSON.stringify(navStack[navStack.length-1]||null);
+    if(dv._screen===screen&&dv.classList.contains('active'))keepScroll=true;
+    dv._screen=screen;
     curDetailType=listType;
     dv.innerHTML=`<div class="wrap">${html}</div>`;
     dv.scrollTop=keepScroll?top:0;
@@ -1335,6 +1362,15 @@ function _detailInternal(type,keepScroll=false){
     else html+=searchBox('Search name, title, mobile...')+files.map(f=>renderFileItem(f,type)).join('')+noResults();
     renderDetail(html,{listType:type,keepScroll});
 }
+// Collapse a card smoothly before the list is re-rendered without it
+function animateOut(el){
+    if(!el)return Promise.resolve();
+    el.style.height=el.offsetHeight+'px';el.style.overflow='hidden';
+    void el.offsetHeight;
+    el.classList.add('removing');
+    return new Promise(r=>setTimeout(r,260));
+}
+function cardEl(sel){return document.querySelector('#detailView '+sel);}
 function refreshDetail(){
     const dv=document.getElementById('detailView');
     if(!curDetailType||!dv.classList.contains('active'))return;
@@ -1393,7 +1429,7 @@ function renderFileItem(file,type){
         `<button class="action-btn call-btn" onclick="makeCall(${jsArg(file.mobile||'')})">📞 Call</button>`+
         (!isRet?`<button class="action-btn receive-btn" onclick="confirmReceive(${jsArg(fid)},${jsArg(type)},${jsArg(entryTitle)},${jsArg(name)})">✓ ${rl}</button>`
                :`<button class="action-btn delete-btn" onclick="confirmDelete(${jsArg(fid)},${jsArg(type)},${jsArg(entryTitle)})">🗑 Delete</button>`);
-    return`<article class="file-item" data-s="${esc(search)}">${banner}${head}<div class="file-content"><div class="file-info">${info}</div>${warn}<div class="file-actions">${actions}</div></div></article>`;
+    return`<article class="file-item" data-id="${esc(String(fid))}" data-s="${esc(search)}">${banner}${head}<div class="file-content"><div class="file-info">${info}</div>${warn}<div class="file-actions">${actions}</div></div></article>`;
 }
 function showFileImg(type,id){const f=getArr(type).find(x=>x.id===id);if(f&&f.image)showImgPrev(f.image);}
 function showImgPrev(elOrSrc){
@@ -1517,6 +1553,7 @@ async function doReceive(id,type,extra={},msg=''){
         ret.push({...file,returnedAt:now.toISOString(),completedAt:now.toISOString(),returnedLate:now>new Date(file.expiresAt),...extra});
         try{
             await Promise.all([setArr(key,arr),setArr(target,ret)]);
+            await animateOut(cardEl(`.file-item[data-id="${CSS.escape(String(id))}"]`));
             toast(msg||(type.includes('Task')?'✓ Task marked complete':'✓ Marked as returned'),'success');
         }catch(e){toast('Save failed: '+e.message,'error');}
         refreshDetail();loadCounts();
@@ -1530,7 +1567,11 @@ function confirmDelete(id,type,title){
 }
 async function doDelete(id,type){
     if(!RETURNED_TYPES.includes(type))return;
-    try{await setArr(type,getArr(type).filter(f=>f.id!==id));toast('Entry deleted','success');}
+    try{
+        await setArr(type,getArr(type).filter(f=>f.id!==id));
+        await animateOut(cardEl(`.file-item[data-id="${CSS.escape(String(id))}"]`));
+        toast('Entry deleted','success');
+    }
     catch(e){toast('Delete failed: '+e.message,'error');}
     refreshDetail();loadCounts();
 }
@@ -1804,7 +1845,7 @@ function deleteFolder(cat,fi){
     const nm=cat==='record'?`${f.month} ${f.year}`:f.name;
     confirmWithPin('Delete Folder',`Delete "${nm}" and all its contents? Enter your PIN to confirm.`,async()=>{
         const folders=getArr(sk);folders.splice(fi,1);
-        try{await setArr(sk,folders);toast('Folder deleted','success');}catch(e){toast('Delete failed: '+e.message,'error');}
+        try{await setArr(sk,folders);await animateOut(cardEl(`.folder-card[data-idx="${fi}"]`));toast('Folder deleted','success');}catch(e){toast('Delete failed: '+e.message,'error');}
         if(cat==='englishFile')openEnglishFile(true);else openRecord(true);
         loadCounts();
     });
@@ -1821,7 +1862,7 @@ function deleteDocument(cat,fi,di){
     const doc=(engFolders()[fi]||{documents:[]}).documents[di];if(!doc)return;
     confirmWithPin('Delete Document',`Delete "${doc.name}"? Enter your PIN to confirm.`,async()=>{
         const folders=engFolders();folders[fi].documents.splice(di,1);
-        try{await setArr('englishFile_folders',folders);toast('Document deleted','success');}catch(e){toast('Delete failed: '+e.message,'error');}
+        try{await setArr('englishFile_folders',folders);await animateOut(cardEl(`.document-card[data-idx="${di}"]`));toast('Document deleted','success');}catch(e){toast('Delete failed: '+e.message,'error');}
         openEnglishFolder(fi,true);loadCounts();
     });
 }
@@ -1888,7 +1929,7 @@ function deleteBailBond(i){
     const b=getArr('bailBonds')[i];if(!b)return;
     confirmWithPin('Delete Bail Bond',`Delete "${b.title}"? Enter your PIN to confirm.`,async()=>{
         const bonds=getArr('bailBonds');bonds.splice(i,1);
-        try{await setArr('bailBonds',bonds);toast('Bail bond deleted','success');}catch(e){toast('Delete failed: '+e.message,'error');}
+        try{await setArr('bailBonds',bonds);await animateOut(cardEl(`.document-card[data-idx="${i}"]`));toast('Bail bond deleted','success');}catch(e){toast('Delete failed: '+e.message,'error');}
         openBailBonds(true);loadCounts();
     });
 }
@@ -2057,7 +2098,7 @@ function deleteRecordCase(fi,ci){
     const cd=(recFolders()[fi]||{cases:[]}).cases[ci];if(!cd)return;
     confirmWithPin('Delete Case',`Delete "${cd.title}"? Enter your PIN to confirm.`,async()=>{
         const folders=recFolders();folders[fi].cases.splice(ci,1);
-        try{await setArr('record_folders',folders);toast('Case deleted','success');}catch(e){toast('Delete failed: '+e.message,'error');}
+        try{await setArr('record_folders',folders);await animateOut(cardEl(`.document-card[data-idx="${ci}"]`));toast('Case deleted','success');}catch(e){toast('Delete failed: '+e.message,'error');}
         openRecordFolder(fi,true);loadCounts();
     });
 }
